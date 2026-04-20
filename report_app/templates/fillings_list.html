@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Список заправок</title>
+    <meta charset="utf-8">
+    <style>
+        /* Общие стили */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        /* Таблица */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+
+        /* Блок остатков — центрированный, компактный */
+        .fuel-balance {
+            text-align: center;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            font-size: 0.95rem;
+        }
+        .fuel-balance h2 {
+            margin: 0 0 5px 0;
+            font-size: 1.2rem;
+        }
+        .total {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 1.1rem;
+        }
+        /* Список уровнемеров в одну строку */
+        .inline-list {
+            list-style: none;
+            padding: 0;
+            margin: 5px 0 0 0;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 15px;
+        }
+        .inline-list li {
+            display: inline;
+        }
+
+        /* Пагинатор (как ранее) */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 30px;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .pagination a, .pagination span {
+            display: inline-block;
+            padding: 8px 14px;
+            text-decoration: none;
+            background-color: #f1f1f1;
+            color: #333;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            transition: 0.2s;
+        }
+        .pagination a:hover {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .pagination .current {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+            font-weight: bold;
+        }
+        .pagination .disabled {
+            background-color: #e9ecef;
+            color: #6c757d;
+            border-color: #dee2e6;
+            cursor: not-allowed;
+        }
+        .pagination .dots {
+            background: none;
+            border: none;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Блок суммарного остатка (центрированный, компактный) -->
+    <div class="fuel-balance">
+        <h2>Суммарный остаток топлива</h2>
+        <p><strong class="total">{{ total_volume }} л.</strong></p>
+        <ul class="inline-list">
+            {% for m in measurements %}
+                <li>Уровнемер {{ forloop.counter }}: {{ m.liters }} л.</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <!-- Таблица заправок -->
+    <table>
+        <thead>
+            <tr>
+                <th>Дата и время</th>
+                <th>Машина</th>
+                <th>Объём (л)</th>      <!-- теперь объём идёт перед контроллером -->
+                <th>Контроллер</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for filling in page_obj %}
+            <tr>
+                <td>{{ filling.dt|date:"d.m.Y H:i:s"|default:"—" }}</td>
+                <td>{{ filling.id_user.full_name|default:"—" }}</td>
+                <td>{{ filling.litre|floatformat:3 }}</td>
+                <td>{{ filling.id_controller.description|default:filling.id_controller.id }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4">Нет данных о заправках.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Пагинатор (без изменений) -->
+    <div class="pagination">
+        {% if page_obj.has_previous %}
+            <a href="?page=1">&laquo; Первая</a>
+            <a href="?page={{ page_obj.previous_page_number }}">Назад</a>
+        {% else %}
+            <span class="disabled">&laquo; Первая</span>
+            <span class="disabled">Назад</span>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+            {% if num == page_obj.number %}
+                <span class="current">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                <a href="?page={{ num }}">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                <a href="?page={{ num }}">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-3' or num == page_obj.number|add:'3' %}
+                <span class="dots">...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}">Вперёд</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}">Последняя &raquo;</a>
+        {% else %}
+            <span class="disabled">Вперёд</span>
+            <span class="disabled">Последняя &raquo;</span>
+        {% endif %}
+    </div>
+</body>
+</html>
