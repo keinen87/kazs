@@ -49,10 +49,10 @@ def fillings_list(request):
     # Получаем данные об остатках топлива
     balance_data = get_fuel_balance_data()
     
-    # Основной запрос заправок
+    # Основной запрос заправок (исключаем нулевые литры)
     fillings = Fillings.objects.select_related(
         'id_user', 'id_controller', 'id_car', 'id_fuel'
-    ).order_by('-date_time')
+    ).filter(litre__gt=0).order_by('-date_time')   # ← добавлен фильтр
     
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
