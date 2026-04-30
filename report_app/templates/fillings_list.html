@@ -137,6 +137,12 @@
             font-style: italic;
         }
         /* (старые стили остаются без изменений) */
+        .meter-title {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
     </style>
 </head>
 <body>
@@ -148,7 +154,14 @@
         <div class="meters-grid">
             {% for m in measurements %}
             <div class="meter-card">
-                <div class="meter-litres">{{ m.liters }} л</div>
+                <div class="meter-title">Уровнемер {{ m.id }}</div>
+                <div class="meter-litres">
+                    {% if m.liters is not None %}
+                        {{ m.liters }} л
+                    {% else %}
+                        — л
+                    {% endif %}
+                </div>
                 <div class="meter-level">
                     {% if m.level_cm is not None %}
                         {{ m.level_cm|floatformat:1 }} см

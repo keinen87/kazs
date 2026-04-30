@@ -6,33 +6,36 @@ from datetime import datetime
 
 
 def get_fuel_balance_data():
-    latest_dates = LevelMetersData.objects.filter(
-        id_level_meter=OuterRef('id_level_meter')
-    ).values('id_level_meter').annotate(
-        max_date=Max('date_time')
-    ).values('max_date')
-    
-    latest_data = LevelMetersData.objects.filter(
-        date_time__in=Subquery(latest_dates),
-        fuel_volume_valid=True
-    ).select_related('id_level_meter')
-    
-    total_liters = 0
+    desired_ids = [1, 2, 3, 4]  # ID уровнемеров, которые нужно показать
     measurements = []
-    for record in latest_data:
-        liters = record.fuel_volume * 1000
-        total_liters += liters
-        
-        # Получаем уровень в сантиметрах
-        level_cm = None
-        if record.level is not None and record.level_valid:
-            level_cm = float(record.level) * 100
-        
-        measurements.append({
-            'id': record.id_level_meter.id,
-            'liters': int(liters),
-            'level_cm': level_cm,          # добавили поле
-        })
+    total_liters = 0
+
+    for lm_id in desired_ids:
+        # Последняя запись с валидным fuel_volume для данного уровнемера
+        latest = LevelMetersData.objects.filter(
+            id_level_meter_id=lm_id,
+            fuel_volume_valid=True
+        ).order_by('-date_time').first()
+
+        if latest:
+            liters = latest.fuel_volume * 1000
+            total_liters += liters
+            level_cm = None
+            if latest.level is not None and latest.level_valid:
+                level_cm = float(latest.level) * 100
+            measurements.append({
+                'id': lm_id,
+                'liters': int(liters),
+                'level_cm': level_cm,
+            })
+        else:
+            # Нет данных – показываем прочерки
+            measurements.append({
+                'id': lm_id,
+                'liters': None,
+                'level_cm': None,
+            })
+
     return {
         'total_volume': int(total_liters),
         'measurements': measurements,
