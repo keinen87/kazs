@@ -102,6 +102,41 @@
             border: none;
             color: #333;
         }
+                /* Остатки топлива - сетка */
+        .meters-grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+            margin: 15px 0;
+        }
+        .meter-card {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 12px;
+            padding: 8px 16px;
+            min-width: 110px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .meter-litres {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .meter-level {
+            font-size: 0.9rem;
+            color: #495057;
+            margin-top: 5px;
+        }
+        .info-text {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px dashed #ccc;
+            color: #6c757d;
+            font-style: italic;
+        }
+        /* (старые стили остаются без изменений) */
     </style>
 </head>
 <body>
@@ -109,12 +144,25 @@
     <!-- Блок суммарного остатка (центрированный, компактный) -->
     <div class="fuel-balance">
         <h2>Суммарный остаток топлива</h2>
-        <p><strong class="total">{{ total_volume }} л.</strong></p>
-        <ul class="inline-list">
+        <p class="total">{{ total_volume }} л.</p>
+        <div class="meters-grid">
             {% for m in measurements %}
-                <li>Уровнемер {{ forloop.counter }}: {{ m.liters }} л.</li>
+            <div class="meter-card">
+                <div class="meter-litres">{{ m.liters }} л</div>
+                <div class="meter-level">
+                    {% if m.level_cm is not None %}
+                        {{ m.level_cm|floatformat:1 }} см
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+            </div>
             {% endfor %}
-        </ul>
+        </div>
+        <!-- Заглушка под текст. Замените содержимое на свой текст -->
+        <div class="info-text">
+            <p>Помните, что при уровнемер физически не достаёт до дна секции. При уровне 15-20 см достоверные данные получить не получится.</p>
+        </div>
     </div>
 
     <!-- Таблица заправок -->

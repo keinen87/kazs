@@ -6,7 +6,6 @@ from datetime import datetime
 
 
 def get_fuel_balance_data():
-
     latest_dates = LevelMetersData.objects.filter(
         id_level_meter=OuterRef('id_level_meter')
     ).values('id_level_meter').annotate(
@@ -23,9 +22,16 @@ def get_fuel_balance_data():
     for record in latest_data:
         liters = record.fuel_volume * 1000
         total_liters += liters
+        
+        # Получаем уровень в сантиметрах
+        level_cm = None
+        if record.level is not None and record.level_valid:
+            level_cm = float(record.level) * 100
+        
         measurements.append({
             'id': record.id_level_meter.id,
             'liters': int(liters),
+            'level_cm': level_cm,          # добавили поле
         })
     return {
         'total_volume': int(total_liters),
