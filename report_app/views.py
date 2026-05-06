@@ -1,5 +1,6 @@
 from django.shortcuts import render
 from django.core.paginator import Paginator
+from django.db.models import Q
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
 
@@ -53,17 +54,25 @@ def ticks_to_datetime(ticks):
 def fillings_list(request):
     balance_data = get_fuel_balance_data()
 
-    # ID пользователей, для которых не показываем лимит и остаток
-    SKIP_USER_IDS = {3, 4, 5, 6}
+    SKIP_USER_IDS = {3, 4, 5, 6}  # пользователи без лимитов
 
+    # Получаем поисковый запрос
+    search_query = request.GET.get('search', '').strip()
+
+    # Базовый queryset
     fillings = Fillings.objects.select_related(
         'id_user', 'id_controller', 'id_car', 'id_fuel'
-    ).filter(litre__gt=0).order_by('-date_time')
+    ).filter(litre__gt=0)
+
+    # Применяем фильтр по машине (по полному имени пользователя)
+    if search_query:
+        fillings = fillings.filter(id_user__full_name__icontains=search_query)
+
+    fillings = fillings.order_by('-date_time')
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1)
 
-    # Словарь расхода за месяц только для обычных пользователей (не из SKIP)
     spent_dict = {}
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
@@ -74,9 +83,8 @@ def fillings_list(request):
             if filling.dt and filling.dt >= month_start:
                 spent_dict[user.id] = spent_dict.get(user.id, 0) + filling.litre
         else:
-            filling.month_limit = None  # для пропущенных пользователей
+            filling.month_limit = None
 
-    # Добавляем остаток для каждой заправки
     for filling in fillings:
         if filling.id_user and filling.id_user.id not in SKIP_USER_IDS:
             limit = filling.month_limit or 0
@@ -93,5 +101,6 @@ def fillings_list(request):
         'page_obj': page_obj,
         'total_volume': balance_data['total_volume'],
         'measurements': balance_data['measurements'],
+        'search_query': search_query,
     }
     return render(request, 'fillings_list.html', context)
