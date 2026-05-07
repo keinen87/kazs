@@ -111,6 +111,10 @@ def fillings_list(request):
 
 
 def fuel_report(request):
+    from .models import Users, Fillings
+    from datetime import datetime
+
+    SKIP_USER_IDS = {3, 4, 5, 6}   # или используйте глобальную константу
 
     # Пользователи, у которых есть хотя бы одна заправка
     users = Users.objects.filter(
@@ -149,12 +153,17 @@ def fuel_report(request):
             ).aggregate(total=Sum('litre'))['total']
             
             total_litres = total if total is not None else 0
-            
-            # Расчёт остатка по лимиту (только если лимит задан)
-            if selected_user.month_limit is not None:
-                remaining = selected_user.month_limit - total_litres
+
+            # Если пользователь не в "скрытом" списке – считаем остаток, иначе скрываем лимит
+            if selected_user.id not in SKIP_USER_IDS:
+                if selected_user.month_limit is not None:
+                    remaining = selected_user.month_limit - total_litres
+                else:
+                    remaining = None
             else:
+                # Для служебных пользователей лимит и остаток не показываем
                 remaining = None
+                selected_user.month_limit = None   # чтобы шаблон не выводил строку лимита
                 
         except Users.DoesNotExist:
             error = "Выбранная машина не найдена"
