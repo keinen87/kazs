@@ -184,7 +184,6 @@
         </div>
     </div>
 
-    <!-- Форма поиска по названию машины -->
     <div class="search-form">
         <form method="get" action="">
             <input type="text" name="search" placeholder="Поиск по машине..." value="{{ search_query }}">
@@ -199,11 +198,11 @@
         <thead>
             <tr>
                 <th>Дата и время</th>
-                <th>Машина</th>
+                <th>Кто заправлялся</th>
+                <th>Сколько заправил (л)</th>
+                <th>Контроллер</th>
                 <th>Лимит (л/мес)</th>
                 <th>Остаток на месяц (л)</th>
-                <th>Объём (л)</th>
-                <th>Контроллер</th>
             </tr>
         </thead>
         <tbody>
@@ -211,6 +210,8 @@
             <tr>
                 <td>{{ filling.dt|date:"d.m.Y H:i:s"|default:"—" }}</td>
                 <td>{{ filling.id_user.full_name|default:"—" }}</td>
+                <td>{{ filling.litre|floatformat:3 }}</td>
+                <td>{{ filling.id_controller.description|default:filling.id_controller.id }}</td>
                 <td>
                     {% if filling.month_limit is not None %}
                         {{ filling.month_limit|floatformat:0 }}
@@ -225,8 +226,6 @@
                         —
                     {% endif %}
                 </td>
-                <td>{{ filling.litre|floatformat:3 }}</td>
-                <td>{{ filling.id_controller.description|default:filling.id_controller.id }}</td>
             </tr>
             {% empty %}
             <tr>
@@ -265,5 +264,34 @@
             <span class="disabled">Последняя &raquo;</span>
         {% endif %}
     </div>
+
+    <script>
+        function updateFuelBalance() {
+            fetch('/api/fuel-balance/')
+                .then(response => {
+                    if (!response.ok) throw new Error('Ошибка сети');
+                    return response.json();
+                })
+                .then(data => {
+                    document.querySelector('.total').innerText = data.total_volume + ' л.';
+                    const metersGrid = document.querySelector('.meters-grid');
+                    if (metersGrid) {
+                        metersGrid.innerHTML = '';
+                        data.measurements.forEach(m => {
+                            const card = document.createElement('div');
+                            card.className = 'meter-card';
+                            card.innerHTML = `
+                                <div class="meter-title">Уровнемер ${m.id}</div>
+                                <div class="meter-litres">${m.liters !== null ? m.liters + ' л' : '— л'}</div>
+                                <div class="meter-level">${m.level_cm !== null ? m.level_cm.toFixed(1) + ' см' : '—'}</div>
+                            `;
+                            metersGrid.appendChild(card);
+                        });
+                    }
+                })
+                .catch(error => console.error('Ошибка обновления остатков:', error));
+        }
+        setInterval(updateFuelBalance, 30000);
+    </script>
 </body>
 </html>

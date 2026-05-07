@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
 
@@ -40,6 +41,12 @@ def get_fuel_balance_data():
     }
 
 
+def fuel_balance_api(request):
+    """Возвращает JSON с остатками топлива для AJAX-обновления"""
+    data = get_fuel_balance_data()
+    return JsonResponse(data)
+
+
 def ticks_to_datetime(ticks):
     if not ticks or ticks <= 0:
         return None
@@ -56,15 +63,12 @@ def fillings_list(request):
 
     SKIP_USER_IDS = {3, 4, 5, 6}  # пользователи без лимитов
 
-    # Получаем поисковый запрос
     search_query = request.GET.get('search', '').strip()
 
-    # Базовый queryset
     fillings = Fillings.objects.select_related(
         'id_user', 'id_controller', 'id_car', 'id_fuel'
     ).filter(litre__gt=0)
 
-    # Применяем фильтр по машине (по полному имени пользователя)
     if search_query:
         fillings = fillings.filter(id_user__full_name__icontains=search_query)
 
