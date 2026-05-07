@@ -33,14 +33,18 @@
             margin-bottom: 20px;
             font-size: 0.95rem;
         }
-        .fuel-balance h2 {
+        .fuel-balance h3 {
             margin: 0 0 5px 0;
-            font-size: 1.2rem;
+            font-size: 1.3rem;
+            color: #333;
         }
         .total {
             font-weight: bold;
             color: #007bff;
-            font-size: 1.1rem;
+            font-size: 2.5rem;
+            letter-spacing: 2px;
+            margin: 5px 0;
+            line-height: 1.2;
         }
         .meters-grid {
             display: flex;
@@ -59,9 +63,10 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
         }
         .meter-litres {
-            font-size: 1.2rem;
+            font-size: 1.5rem;
             font-weight: bold;
             color: #007bff;
+            letter-spacing: 1px;
         }
         .meter-level {
             font-size: 0.9rem;
@@ -155,11 +160,11 @@
 </head>
 <body>
     <div style="text-align: right; margin-bottom: 10px;">
-    <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива</a>
+        <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива</a>
     </div>
     <div class="fuel-balance">
-        <h2>Суммарный остаток топлива</h2>
-        <p class="total">{{ total_volume }} л.</p>
+        <h3>Суммарный остаток топлива (л)</h3>
+        <div class="total">{{ total_volume }}</div>
         <div class="meters-grid">
             {% for m in measurements %}
             <div class="meter-card">
@@ -275,7 +280,8 @@
                     return response.json();
                 })
                 .then(data => {
-                    document.querySelector('.total').innerText = data.total_volume + ' л.';
+                    // обновляем только число, без "л."
+                    document.querySelector('.total').innerText = data.total_volume;
                     const metersGrid = document.querySelector('.meters-grid');
                     if (metersGrid) {
                         metersGrid.innerHTML = '';
