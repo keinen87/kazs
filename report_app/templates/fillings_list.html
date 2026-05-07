@@ -154,7 +154,9 @@
     </style>
 </head>
 <body>
-
+    <div style="text-align: right; margin-bottom: 10px;">
+    <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива</a>
+    </div>
     <div class="fuel-balance">
         <h2>Суммарный остаток топлива</h2>
         <p class="total">{{ total_volume }} л.</p>

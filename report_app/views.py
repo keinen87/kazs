@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
@@ -108,3 +108,67 @@ def fillings_list(request):
         'search_query': search_query,
     }
     return render(request, 'fillings_list.html', context)
+
+
+def fuel_report(request):
+
+    # Пользователи, у которых есть хотя бы одна заправка
+    users = Users.objects.filter(
+        id__in=Fillings.objects.filter(litre__gt=0).values('id_user').distinct()
+    ).order_by('full_name')
+
+    selected_user_id = request.GET.get('user_id')
+    date_from_str = request.GET.get('date_from')
+    date_to_str = request.GET.get('date_to')
+    
+    total_litres = None
+    selected_user = None
+    remaining = None
+    error = None
+
+    if selected_user_id and date_from_str and date_to_str:
+        try:
+            selected_user = Users.objects.get(id=selected_user_id)
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d')
+            date_to = datetime.strptime(date_to_str, '%Y-%m-%d')
+            date_to_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+            
+            def datetime_to_ticks(dt):
+                epoch_ticks = 621355968000000000
+                seconds = dt.timestamp()
+                return int(seconds * 10_000_000 + epoch_ticks)
+            
+            ticks_from = datetime_to_ticks(date_from)
+            ticks_to = datetime_to_ticks(date_to_end)
+            
+            total = Fillings.objects.filter(
+                id_user=selected_user,
+                litre__gt=0,
+                date_time__gte=ticks_from,
+                date_time__lte=ticks_to
+            ).aggregate(total=Sum('litre'))['total']
+            
+            total_litres = total if total is not None else 0
+            
+            # Расчёт остатка по лимиту (только если лимит задан)
+            if selected_user.month_limit is not None:
+                remaining = selected_user.month_limit - total_litres
+            else:
+                remaining = None
+                
+        except Users.DoesNotExist:
+            error = "Выбранная машина не найдена"
+        except Exception as e:
+            error = f"Ошибка: {str(e)}"
+    
+    context = {
+        'users': users,
+        'selected_user_id': selected_user_id,
+        'selected_user': selected_user,
+        'date_from': date_from_str,
+        'date_to': date_to_str,
+        'total_litres': total_litres,
+        'remaining': remaining,
+        'error': error,
+    }
+    return render(request, 'fuel_report.html', context)
