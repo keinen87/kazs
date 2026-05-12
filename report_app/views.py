@@ -1,11 +1,37 @@
 from django.shortcuts import render
 from django.core.paginator import Paginator
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
 
 
+# ---------------------- Вспомогательные функции ----------------------
+def ticks_to_datetime(ticks):
+    """Преобразует .NET ticks в datetime object"""
+    if not ticks or ticks <= 0:
+        return None
+    try:
+        epoch_ticks = 621355968000000000
+        seconds = (ticks - epoch_ticks) / 10_000_000
+        return datetime.fromtimestamp(seconds)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def datetime_to_ticks(dt):
+    """Преобразует datetime object в .NET ticks"""
+    epoch_ticks = 621355968000000000
+    seconds = dt.timestamp()
+    return int(seconds * 10_000_000 + epoch_ticks)
+
+
+# ---------------------- Константы ----------------------
+SKIP_USER_IDS = {3, 4, 5, 6}          # пользователи без лимитов (операторы, приём топлива)
+LIMIT_START_DATE = datetime(2026, 5, 5)  # с этой даты начинаем показывать лимиты и остатки
+
+
+# ---------------------- Данные по уровнемерам (общие) ----------------------
 def get_fuel_balance_data():
     desired_ids = [1, 2, 3, 4]
     measurements = []
@@ -47,24 +73,12 @@ def fuel_balance_api(request):
     return JsonResponse(data)
 
 
-def ticks_to_datetime(ticks):
-    if not ticks or ticks <= 0:
-        return None
-    try:
-        epoch_ticks = 621355968000000000
-        seconds = (ticks - epoch_ticks) / 10_000_000
-        return datetime.fromtimestamp(seconds)
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
+# ---------------------- Основная страница со списком заправок ----------------------
 def fillings_list(request):
     balance_data = get_fuel_balance_data()
-
-    SKIP_USER_IDS = {3, 4, 5, 6}  # пользователи без лимитов
-
     search_query = request.GET.get('search', '').strip()
 
+    # Базовый запрос заправок (только положительные литры)
     fillings = Fillings.objects.select_related(
         'id_user', 'id_controller', 'id_car', 'id_fuel'
     ).filter(litre__gt=0)
@@ -72,31 +86,42 @@ def fillings_list(request):
     if search_query:
         fillings = fillings.filter(id_user__full_name__icontains=search_query)
 
-    fillings = fillings.order_by('-date_time')
+    fillings = fillings.order_by('-date_time')  # от новых к старым
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1)
+    ticks_month_start = datetime_to_ticks(month_start)
 
-    spent_dict = {}
+    # Преобразуем даты и проставляем лимит пользователя (кроме исключённых)
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
-
         user = filling.id_user
         if user and user.id not in SKIP_USER_IDS:
             filling.month_limit = user.month_limit
-            if filling.dt and filling.dt >= month_start:
-                spent_dict[user.id] = spent_dict.get(user.id, 0) + filling.litre
         else:
             filling.month_limit = None
 
+    # Расчёт остатка на момент заправки (только для заправок после LIMIT_START_DATE)
     for filling in fillings:
-        if filling.id_user and filling.id_user.id not in SKIP_USER_IDS:
-            limit = filling.month_limit or 0
-            spent = spent_dict.get(filling.id_user.id, 0)
-            filling.remaining = limit - spent
+        user = filling.id_user
+        # Для заправок раньше 5 мая 2026 – скрываем и лимит, и остаток
+        if filling.dt and filling.dt < LIMIT_START_DATE:
+            filling.month_limit = None
+            filling.remaining = None
+            continue
+
+        if (user and user.id not in SKIP_USER_IDS and filling.month_limit is not None):
+            spent_up_to_date = Fillings.objects.filter(
+                id_user=user,
+                litre__gt=0,
+                date_time__gte=ticks_month_start,
+                date_time__lte=filling.date_time
+            ).aggregate(total=Sum('litre'))['total'] or 0
+            filling.remaining = filling.month_limit - spent_up_to_date
         else:
             filling.remaining = None
 
+    # Пагинация
     paginator = Paginator(fillings, 20)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
@@ -110,13 +135,9 @@ def fillings_list(request):
     return render(request, 'fillings_list.html', context)
 
 
+# ---------------------- Отчёт по выдаче топлива ----------------------
 def fuel_report(request):
-    from .models import Users, Fillings
-    from datetime import datetime
-
-    SKIP_USER_IDS = {3, 4, 5, 6}   # или используйте глобальную константу
-
-    # Пользователи, у которых есть хотя бы одна заправка
+    # Показываем только тех пользователей, у которых есть хотя бы одна заправка
     users = Users.objects.filter(
         id__in=Fillings.objects.filter(litre__gt=0).values('id_user').distinct()
     ).order_by('full_name')
@@ -137,11 +158,6 @@ def fuel_report(request):
             date_to = datetime.strptime(date_to_str, '%Y-%m-%d')
             date_to_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
             
-            def datetime_to_ticks(dt):
-                epoch_ticks = 621355968000000000
-                seconds = dt.timestamp()
-                return int(seconds * 10_000_000 + epoch_ticks)
-            
             ticks_from = datetime_to_ticks(date_from)
             ticks_to = datetime_to_ticks(date_to_end)
             
@@ -154,17 +170,16 @@ def fuel_report(request):
             
             total_litres = total if total is not None else 0
 
-            # Если пользователь не в "скрытом" списке – считаем остаток, иначе скрываем лимит
+            # Для служебных пользователей лимит и остаток не показываем
             if selected_user.id not in SKIP_USER_IDS:
                 if selected_user.month_limit is not None:
                     remaining = selected_user.month_limit - total_litres
                 else:
                     remaining = None
             else:
-                # Для служебных пользователей лимит и остаток не показываем
                 remaining = None
-                selected_user.month_limit = None   # чтобы шаблон не выводил строку лимита
-                
+                selected_user.month_limit = None
+
         except Users.DoesNotExist:
             error = "Выбранная машина не найдена"
         except Exception as e:
