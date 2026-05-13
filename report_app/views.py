@@ -25,7 +25,7 @@ def datetime_to_ticks(dt):
 
 
 # ---------------------- Константы ----------------------
-SKIP_USER_IDS = {3, 4, 5, 6}
+SKIP_USER_IDS = {3, 4, 5, 6, 39}
 LIMIT_START_DATE = datetime(2026, 5, 5)
 
 
