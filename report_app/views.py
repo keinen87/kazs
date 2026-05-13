@@ -8,7 +8,6 @@ from datetime import datetime
 
 # ---------------------- Вспомогательные функции ----------------------
 def ticks_to_datetime(ticks):
-    """Преобразует .NET ticks в datetime object"""
     if not ticks or ticks <= 0:
         return None
     try:
@@ -20,15 +19,14 @@ def ticks_to_datetime(ticks):
 
 
 def datetime_to_ticks(dt):
-    """Преобразует datetime object в .NET ticks"""
     epoch_ticks = 621355968000000000
     seconds = dt.timestamp()
     return int(seconds * 10_000_000 + epoch_ticks)
 
 
 # ---------------------- Константы ----------------------
-SKIP_USER_IDS = {3, 4, 5, 6}          # пользователи без лимитов (операторы, приём топлива)
-LIMIT_START_DATE = datetime(2026, 5, 5)  # с этой даты начинаем показывать лимиты и остатки
+SKIP_USER_IDS = {3, 4, 5, 6}
+LIMIT_START_DATE = datetime(2026, 5, 5)
 
 
 # ---------------------- Данные по уровнемерам (общие) ----------------------
@@ -38,6 +36,7 @@ def get_fuel_balance_data():
     total_liters = 0
 
     for lm_id in desired_ids:
+        # Последняя запись с валидным fuel_volume (объём)
         latest = LevelMetersData.objects.filter(
             id_level_meter_id=lm_id,
             fuel_volume_valid=True
@@ -49,16 +48,24 @@ def get_fuel_balance_data():
             level_cm = None
             if latest.level is not None and latest.level_valid:
                 level_cm = float(latest.level) * 100
+
+            # Получаем массу в кг (в базе тонны)
+            mass_kg = None
+            if latest.mass is not None and latest.mass_valid:
+                mass_kg = int(latest.mass * 1000)  # округляем до целых кг
+
             measurements.append({
                 'id': lm_id,
                 'liters': int(liters),
                 'level_cm': level_cm,
+                'mass_kg': mass_kg,
             })
         else:
             measurements.append({
                 'id': lm_id,
                 'liters': None,
                 'level_cm': None,
+                'mass_kg': None,
             })
 
     return {
@@ -68,7 +75,6 @@ def get_fuel_balance_data():
 
 
 def fuel_balance_api(request):
-    """Возвращает JSON с остатками топлива для AJAX-обновления"""
     data = get_fuel_balance_data()
     return JsonResponse(data)
 
@@ -78,7 +84,6 @@ def fillings_list(request):
     balance_data = get_fuel_balance_data()
     search_query = request.GET.get('search', '').strip()
 
-    # Базовый запрос заправок (только положительные литры)
     fillings = Fillings.objects.select_related(
         'id_user', 'id_controller', 'id_car', 'id_fuel'
     ).filter(litre__gt=0)
@@ -86,13 +91,12 @@ def fillings_list(request):
     if search_query:
         fillings = fillings.filter(id_user__full_name__icontains=search_query)
 
-    fillings = fillings.order_by('-date_time')  # от новых к старым
+    fillings = fillings.order_by('-date_time')
 
     now = datetime.now()
     month_start = datetime(now.year, now.month, 1)
     ticks_month_start = datetime_to_ticks(month_start)
 
-    # Преобразуем даты и проставляем лимит пользователя (кроме исключённых)
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
         user = filling.id_user
@@ -101,10 +105,8 @@ def fillings_list(request):
         else:
             filling.month_limit = None
 
-    # Расчёт остатка на момент заправки (только для заправок после LIMIT_START_DATE)
     for filling in fillings:
         user = filling.id_user
-        # Для заправок раньше 5 мая 2026 – скрываем и лимит, и остаток
         if filling.dt and filling.dt < LIMIT_START_DATE:
             filling.month_limit = None
             filling.remaining = None
@@ -121,7 +123,6 @@ def fillings_list(request):
         else:
             filling.remaining = None
 
-    # Пагинация
     paginator = Paginator(fillings, 20)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
@@ -137,7 +138,6 @@ def fillings_list(request):
 
 # ---------------------- Отчёт по выдаче топлива ----------------------
 def fuel_report(request):
-    # Показываем только тех пользователей, у которых есть хотя бы одна заправка
     users = Users.objects.filter(
         id__in=Fillings.objects.filter(litre__gt=0).values('id_user').distinct()
     ).order_by('full_name')
@@ -170,7 +170,6 @@ def fuel_report(request):
             
             total_litres = total if total is not None else 0
 
-            # Для служебных пользователей лимит и остаток не показываем
             if selected_user.id not in SKIP_USER_IDS:
                 if selected_user.month_limit is not None:
                     remaining = selected_user.month_limit - total_litres

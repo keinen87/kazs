@@ -58,9 +58,15 @@
             border: 1px solid #dee2e6;
             border-radius: 12px;
             padding: 8px 16px;
-            min-width: 110px;
+            min-width: 120px;
             text-align: center;
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .meter-title {
+            font-size: 0.75rem;
+            color: #6c757d;
+            margin-bottom: 5px;
+            text-transform: uppercase;
         }
         .meter-litres {
             font-size: 1.5rem;
@@ -68,10 +74,10 @@
             color: #007bff;
             letter-spacing: 1px;
         }
-        .meter-level {
-            font-size: 0.9rem;
+        .meter-level, .meter-mass {
+            font-size: 0.85rem;
             color: #495057;
-            margin-top: 5px;
+            margin-top: 3px;
         }
         .info-text {
             margin-top: 15px;
@@ -79,12 +85,6 @@
             border-top: 1px dashed #ccc;
             color: #6c757d;
             font-style: italic;
-        }
-        .meter-title {
-            font-size: 0.75rem;
-            color: #6c757d;
-            margin-bottom: 5px;
-            text-transform: uppercase;
         }
         .search-form {
             margin: 20px 0 10px;
@@ -162,6 +162,7 @@
     <div style="text-align: right; margin-bottom: 10px;">
         <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива</a>
     </div>
+
     <div class="fuel-balance">
         <h3>Суммарный остаток топлива (л)</h3>
         <div class="total">{{ total_volume }}</div>
@@ -179,6 +180,13 @@
                 <div class="meter-level">
                     {% if m.level_cm is not None %}
                         {{ m.level_cm|floatformat:1 }} см
+                    {% else %}
+                        —
+                    {% endif %}
+                </div>
+                <div class="meter-mass">
+                    {% if m.mass_kg is not None %}
+                        {{ m.mass_kg }} кг
                     {% else %}
                         —
                     {% endif %}
@@ -280,7 +288,6 @@
                     return response.json();
                 })
                 .then(data => {
-                    // обновляем только число, без "л."
                     document.querySelector('.total').innerText = data.total_volume;
                     const metersGrid = document.querySelector('.meters-grid');
                     if (metersGrid) {
@@ -292,6 +299,7 @@
                                 <div class="meter-title">Уровнемер ${m.id}</div>
                                 <div class="meter-litres">${m.liters !== null ? m.liters + ' л' : '— л'}</div>
                                 <div class="meter-level">${m.level_cm !== null ? m.level_cm.toFixed(1) + ' см' : '—'}</div>
+                                <div class="meter-mass">${m.mass_kg !== null ? m.mass_kg + ' кг' : '—'}</div>
                             `;
                             metersGrid.appendChild(card);
                         });
