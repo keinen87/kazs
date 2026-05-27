@@ -1,31 +1,9 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Список заправок</title>
-    <meta charset="utf-8">
-    {% load static %}
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+{% extends "base.html" %}
+
+{% block title %}Список заправок{% endblock %}
+
+{% block extra_styles %}
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
         .fuel-balance {
             text-align: center;
             background: #f8f9fa;
@@ -118,51 +96,12 @@
         .search-form .clear-btn:hover {
             background-color: #5a6268;
         }
-        .pagination {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-top: 30px;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .pagination a, .pagination span {
-            display: inline-block;
-            padding: 8px 14px;
-            text-decoration: none;
-            background-color: #f1f1f1;
-            color: #333;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-            transition: 0.2s;
-        }
-        .pagination a:hover {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
-        }
-        .pagination .current {
-            background-color: #007bff;
-            color: white;
-            border-color: #007bff;
-            font-weight: bold;
-        }
-        .pagination .disabled {
-            background-color: #e9ecef;
-            color: #6c757d;
-            border-color: #dee2e6;
-            cursor: not-allowed;
-        }
-        .pagination .dots {
-            background: none;
-            border: none;
-            color: #333;
-        }
     </style>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
     <div style="text-align: right; margin-bottom: 10px;">
-        <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива</a>
+        <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">📊 Отчёт по выдаче топлива с КАЗС и заправкам техники</a>
     </div>
 
     <div class="fuel-balance">
@@ -202,7 +141,7 @@
     </div>
 
     <div class="search-form">
-        <form method="get" action="">
+        <form method="get" action="" onsubmit="showLoading()">
             <input type="text" name="search" placeholder="Поиск по машине..." value="{{ search_query }}">
             <button type="submit">Найти</button>
             {% if search_query %}
@@ -311,5 +250,4 @@
         }
         setInterval(updateFuelBalance, 30000);
     </script>
-</body>
-</html>
+{% endblock %}

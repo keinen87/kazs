@@ -1,17 +1,11 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Отчёт по выдаче топлива</title>
-    <meta charset="utf-8">
-    {% load static %}
-    <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+{% extends "base.html" %}
+
+{% block title %}Отчёт по выдаче топлива на КАЗС и заправкам в технику{% endblock %}
+
+{% block extra_styles %}
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
         .report-container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             background: #f8f9fa;
             border-radius: 8px;
@@ -54,24 +48,43 @@
         button:hover {
             background-color: #0056b3;
         }
-        .result {
+        .results-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        .result-card {
+            flex: 1;
             background: white;
             border-radius: 8px;
             padding: 20px;
             text-align: center;
             border: 1px solid #dee2e6;
+            min-width: 250px;
         }
-        .result h3 {
+        .result-card h3 {
             margin: 0 0 10px;
             color: #007bff;
         }
-        .total-litres {
+        .total-litres, .fortmonitor-info {
             font-size: 2rem;
             font-weight: bold;
+            margin: 10px 0;
+        }
+        .total-litres {
             color: #28a745;
         }
+        .fortmonitor-info {
+            color: #17a2b8;
+        }
+        .not-connected-message, .no-data-message {
+            font-size: 1rem;
+            color: #6c757d;
+            margin: 10px 0;
+        }
         .limit-info, .remaining-info {
-            font-size: 1.1rem;
+            font-size: 1rem;
             margin-top: 10px;
         }
         .info {
@@ -79,32 +92,30 @@
             font-size: 0.9rem;
             color: #6c757d;
         }
-        .back-link {
-            display: inline-block;
+        .warning-note {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 8px;
+            font-style: italic;
+        }
+        .fm-link {
             margin-top: 20px;
             text-align: center;
-            width: 100%;
-            text-decoration: none;
-            color: #007bff;
         }
-        .error {
-            color: red;
+        .fm-link a {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .fm-link a:hover {
+            text-decoration: underline;
         }
     </style>
-    <script>
-        function setCurrentDate() {
-            const today = new Date();
-            const yyyy = today.getFullYear();
-            const mm = String(today.getMonth() + 1).padStart(2, '0');
-            const dd = String(today.getDate()).padStart(2, '0');
-            document.getElementById('date_to').value = `${yyyy}-${mm}-${dd}`;
-        }
-    </script>
-</head>
-<body>
+{% endblock %}
+
+{% block content %}
     <div class="report-container">
-        <h1>Отчёт по выдаче топлива</h1>
-        <form method="get">
+        <h1>Отчёт по выдаче топлива на КАЗС и заправкам в технику</h1>
+        <form method="get" onsubmit="showLoading()">
             <div class="form-group">
                 <label for="user">Машина (пользователь):</label>
                 <select name="user_id" id="user" required>
@@ -132,27 +143,57 @@
         </form>
 
         {% if total_litres is not None %}
-        <div class="result">
-            <h3>Результат за период</h3>
-            <div class="total-litres">{{ total_litres|floatformat:3 }} л</div>
-            {% if selected_user.month_limit is not None %}
-            <div class="limit-info">Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
-            <div class="remaining-info">Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
-            {% else %}
-            <div class="limit-info">Лимит не задан</div>
-            {% endif %}
-            <div class="info">
-                Машина: {{ selected_user.full_name }}<br>
-                Период: {{ date_from|default:"—" }} – {{ date_to|default:"—" }}
+        <div class="results-row">
+            <div class="result-card">
+                <h3>📦 Выдача топлива (база)</h3>
+                <div class="total-litres">{{ total_litres|floatformat:3 }} л</div>
+                {% if selected_user.month_limit is not None %}
+                <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
+                <div class="remaining-info">⏳ Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
+                {% else %}
+                <div class="limit-info">Лимит не задан</div>
+                {% endif %}
+                <div class="info">
+                    {{ selected_user.full_name }}<br>
+                    {{ date_from|default:"—" }} – {{ date_to|default:"—" }}
+                </div>
+            </div>
+
+            <div class="result-card">
+                <h3>⛽ Заправки в технику (FortMonitor)</h3>
+                {% if not is_mapped %}
+                    <div class="not-connected-message">Техника не подключена к Fort Monitor</div>
+                {% else %}
+                    {% if fortmonitor_total is None %}
+                        <div class="no-data-message">Нет данных за период</div>
+                    {% else %}
+                        <div class="fortmonitor-info">{{ fortmonitor_total|floatformat:3 }} л</div>
+                        {% if fortmonitor_total == 0 or fortmonitor_total > 65000 %}
+                            <div class="warning-note">⚠️ Возможно, система не настроена</div>
+                        {% endif %}
+                    {% endif %}
+                {% endif %}
+                <div class="fm-link">
+                    <a href="{{ fm_report_url }}" target="_blank">📌 Посмотреть подробный отчёт Fort Monitor</a>
+                </div>
             </div>
         </div>
         {% elif error %}
-        <div class="result error">
+        <div class="error">
             {{ error }}
         </div>
         {% endif %}
 
         <a href="{% url 'report_app:fillings_list' %}" class="back-link">← Назад к списку заправок</a>
     </div>
-</body>
-</html>
+
+    <script>
+        function setCurrentDate() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            document.getElementById('date_to').value = `${yyyy}-${mm}-${dd}`;
+        }
+    </script>
+{% endblock %}

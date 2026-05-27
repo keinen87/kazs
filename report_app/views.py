@@ -4,6 +4,37 @@ from django.db.models import Sum
 from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
+import requests
+import memcache
+
+# ---------------------- Константы FortMonitor ----------------------
+FM_REPORT_URL = "http://31.173.168.107:8080/"
+FM_URL_TEMPLATE = "http://31.173.168.107:8080/api/integration/v1/"
+FM_LOGIN = "bassol_api"
+FM_PASSWORD = "Bassl22052026"
+FM_MC_SERVER = '127.0.0.1:11211'
+
+VEHICLE_MAP = {
+    '8': 'Hino',
+    '9': 'Hitachi 1',
+    '10': 'Hitachi 2',
+    '24': 'Rimpull 1',
+    '23': 'Rimpull 2',
+    '25': 'Rimpull 3',
+    '22': 'Vermeer 1',
+    '15': 'Автокран XCMG',
+    '16': 'Кран Zoomlion',
+    '18': 'Камаз 65201',
+    '21': 'Автопогрузчик FH',
+    '29': 'Погрузчик Lonkin',
+    '26': 'Подборщик',
+    '32': 'Тепловоз ТЭМ7А',
+    '31': 'Тепловоз ТЭМ9'
+}
+
+# ---------------------- Константы приложения ----------------------
+SKIP_USER_IDS = {3, 4, 5, 6, 39}
+LIMIT_START_DATE = datetime(2026, 5, 5)
 
 
 # ---------------------- Вспомогательные функции ----------------------
@@ -17,26 +48,71 @@ def ticks_to_datetime(ticks):
     except (ValueError, OverflowError, OSError):
         return None
 
-
 def datetime_to_ticks(dt):
     epoch_ticks = 621355968000000000
     seconds = dt.timestamp()
     return int(seconds * 10_000_000 + epoch_ticks)
 
+# ---------------------- FortMonitor функции с кэшированием ----------------------
+def get_session_id() -> str:
+    url = FM_URL_TEMPLATE + "connect"
+    params = {"login": FM_LOGIN, "password": FM_PASSWORD}
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.headers["SessionId"]
 
-# ---------------------- Константы ----------------------
-SKIP_USER_IDS = {3, 4, 5, 6, 39}
-LIMIT_START_DATE = datetime(2026, 5, 5)
+def get_session_status(session_id: str) -> bool:
+    url = FM_URL_TEMPLATE + "ping"
+    headers = {"SessionId": session_id}
+    resp = requests.get(url, headers=headers, timeout=5)
+    return resp.text.strip().lower() == "true"
 
+def get_valid_session() -> str:
+    mc = memcache.Client([FM_MC_SERVER], debug=0)
+    session_id = mc.get("fortmonitor_session_id")
+    if not session_id or not get_session_status(session_id):
+        session_id = get_session_id()
+        mc.set("fortmonitor_session_id", session_id, time=900)
+    return session_id
 
-# ---------------------- Данные по уровнемерам (общие) ----------------------
+def get_fuelings_from_fortmonitor(vehicle_id: str, date_from: datetime, date_to: datetime) -> list:
+    cache_key = f"fm_fuelings_{vehicle_id}_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}"
+    mc = memcache.Client([FM_MC_SERVER], debug=0)
+    cached = mc.get(cache_key)
+    if cached is not None:
+        return cached
+
+    session_id = get_valid_session()
+    url = FM_URL_TEMPLATE + "fuelings"
+    headers = {"SessionId": session_id}
+    from_str = date_from.strftime("%Y-%m-%d 00:00:00")
+    to_str = date_to.strftime("%Y-%m-%d 23:59:59")
+    params = {
+        "oid": vehicle_id,
+        "from": from_str,
+        "to": to_str
+    }
+    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("result") != "Ok":
+        raise Exception(f"API error: {data.get('result')}")
+    fuelings = data.get("fuelings", [])
+    mc.set(cache_key, fuelings, time=900)
+    return fuelings
+
+def get_total_fortmonitor_fuelings(vehicle_id: str, date_from: datetime, date_to: datetime) -> float:
+    fuelings = get_fuelings_from_fortmonitor(vehicle_id, date_from, date_to)
+    total = sum(f['volume'] for f in fuelings if f.get('fuel_type') == 'fueling')
+    return total
+
+# ---------------------- Данные по уровнемерам ----------------------
 def get_fuel_balance_data():
     desired_ids = [1, 2, 3, 4]
     measurements = []
     total_liters = 0
 
     for lm_id in desired_ids:
-        # Последняя запись с валидным fuel_volume (объём)
         latest = LevelMetersData.objects.filter(
             id_level_meter_id=lm_id,
             fuel_volume_valid=True
@@ -48,12 +124,9 @@ def get_fuel_balance_data():
             level_cm = None
             if latest.level is not None and latest.level_valid:
                 level_cm = float(latest.level) * 100
-
-            # Получаем массу в кг (в базе тонны)
             mass_kg = None
             if latest.mass is not None and latest.mass_valid:
-                mass_kg = int(latest.mass * 1000)  # округляем до целых кг
-
+                mass_kg = int(latest.mass * 1000)
             measurements.append({
                 'id': lm_id,
                 'liters': int(liters),
@@ -73,13 +146,11 @@ def get_fuel_balance_data():
         'measurements': measurements,
     }
 
-
 def fuel_balance_api(request):
     data = get_fuel_balance_data()
     return JsonResponse(data)
 
-
-# ---------------------- Основная страница со списком заправок ----------------------
+# ---------------------- Основная страница списка заправок ----------------------
 def fillings_list(request):
     balance_data = get_fuel_balance_data()
     search_query = request.GET.get('search', '').strip()
@@ -135,8 +206,6 @@ def fillings_list(request):
     }
     return render(request, 'fillings_list.html', context)
 
-
-# ---------------------- Отчёт по выдаче топлива ----------------------
 def fuel_report(request):
     users = Users.objects.filter(
         id__in=Fillings.objects.filter(litre__gt=0).values('id_user').distinct()
@@ -150,6 +219,8 @@ def fuel_report(request):
     selected_user = None
     remaining = None
     error = None
+    fortmonitor_total = None
+    is_mapped = False   # новый флаг
 
     if selected_user_id and date_from_str and date_to_str:
         try:
@@ -179,6 +250,22 @@ def fuel_report(request):
                 remaining = None
                 selected_user.month_limit = None
 
+            # FortMonitor
+            vehicle_id = None
+            for vid, name in VEHICLE_MAP.items():
+                if name == selected_user.short_name:
+                    vehicle_id = vid
+                    break
+            is_mapped = (vehicle_id is not None)   # сохраняем флаг
+            if vehicle_id:
+                try:
+                    fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
+                except Exception as e:
+                    print(f"FortMonitor error: {e}")
+                    fortmonitor_total = None
+            else:
+                fortmonitor_total = None
+
         except Users.DoesNotExist:
             error = "Выбранная машина не найдена"
         except Exception as e:
@@ -193,5 +280,9 @@ def fuel_report(request):
         'total_litres': total_litres,
         'remaining': remaining,
         'error': error,
+        'fortmonitor_total': fortmonitor_total,
+        'is_mapped': is_mapped,
+        'fm_report_url': FM_REPORT_URL,
+        'vehicle_names': list(VEHICLE_MAP.values()),
     }
     return render(request, 'fuel_report.html', context)
