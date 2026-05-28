@@ -151,7 +151,7 @@
         {% if total_litres is not None %}
         <div class="results-row">
             <div class="result-card">
-                <h3>📦 Выдача топлива (база)</h3>
+                <h3>📦 Выдача топлива (КАЗС)</h3>
                 <div class="total-litres">{{ total_litres|floatformat:3 }} л</div>
                 {% if selected_user.month_limit is not None %}
                 <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
