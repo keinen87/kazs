@@ -4,6 +4,7 @@ from django.db.models import Sum
 from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
 from datetime import datetime
+from calendar import monthrange
 import requests
 import memcache
 
@@ -220,51 +221,71 @@ def fuel_report(request):
     remaining = None
     error = None
     fortmonitor_total = None
-    is_mapped = False   # новый флаг
+    is_mapped = False
 
     if selected_user_id and date_from_str and date_to_str:
         try:
             selected_user = Users.objects.get(id=selected_user_id)
             date_from = datetime.strptime(date_from_str, '%Y-%m-%d')
             date_to = datetime.strptime(date_to_str, '%Y-%m-%d')
-            date_to_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
             
-            ticks_from = datetime_to_ticks(date_from)
-            ticks_to = datetime_to_ticks(date_to_end)
-            
-            total = Fillings.objects.filter(
-                id_user=selected_user,
-                litre__gt=0,
-                date_time__gte=ticks_from,
-                date_time__lte=ticks_to
-            ).aggregate(total=Sum('litre'))['total']
-            
-            total_litres = total if total is not None else 0
+            # Проверка: начальная дата не должна быть позже конечной
+            if date_from > date_to:
+                error = "Ошибка: начальная дата не может быть позже конечной."
+            else:
+                date_to_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+                ticks_from = datetime_to_ticks(date_from)
+                ticks_to = datetime_to_ticks(date_to_end)
+                
+                total = Fillings.objects.filter(
+                    id_user=selected_user,
+                    litre__gt=0,
+                    date_time__gte=ticks_from,
+                    date_time__lte=ticks_to
+                ).aggregate(total=Sum('litre'))['total']
+                total_litres = total if total is not None else 0
 
-            if selected_user.id not in SKIP_USER_IDS:
-                if selected_user.month_limit is not None:
-                    remaining = selected_user.month_limit - total_litres
+                # Логика для остатка по лимиту (только если пользователь не в SKIP_USER_IDS)
+                if selected_user.id not in SKIP_USER_IDS and selected_user.month_limit is not None:
+                    # Проверяем, что выбранный период целиком внутри одного календарного месяца
+                    if date_from.year == date_to.year and date_from.month == date_to.month:
+                        # Берём первый и последний день этого месяца
+                        month_start = datetime(date_from.year, date_from.month, 1)
+                        last_day = monthrange(date_from.year, date_from.month)[1]
+                        month_end = datetime(date_from.year, date_from.month, last_day, 23, 59, 59)
+                        ticks_month_start = datetime_to_ticks(month_start)
+                        ticks_month_end = datetime_to_ticks(month_end)
+                        
+                        # Сумма выдач за весь месяц
+                        total_month = Fillings.objects.filter(
+                            id_user=selected_user,
+                            litre__gt=0,
+                            date_time__gte=ticks_month_start,
+                            date_time__lte=ticks_month_end
+                        ).aggregate(total=Sum('litre'))['total'] or 0
+                        
+                        remaining = selected_user.month_limit - total_month
+                    else:
+                        # Период пересекает границу месяцев – остаток не показываем
+                        remaining = None
                 else:
                     remaining = None
-            else:
-                remaining = None
-                selected_user.month_limit = None
 
-            # FortMonitor
-            vehicle_id = None
-            for vid, name in VEHICLE_MAP.items():
-                if name == selected_user.short_name:
-                    vehicle_id = vid
-                    break
-            is_mapped = (vehicle_id is not None)   # сохраняем флаг
-            if vehicle_id:
-                try:
-                    fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
-                except Exception as e:
-                    print(f"FortMonitor error: {e}")
+                # FortMonitor (без изменений)
+                vehicle_id = None
+                for vid, name in VEHICLE_MAP.items():
+                    if name == selected_user.short_name:
+                        vehicle_id = vid
+                        break
+                is_mapped = (vehicle_id is not None)
+                if vehicle_id:
+                    try:
+                        fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
+                    except Exception as e:
+                        print(f"FortMonitor error: {e}")
+                        fortmonitor_total = None
+                else:
                     fortmonitor_total = None
-            else:
-                fortmonitor_total = None
 
         except Users.DoesNotExist:
             error = "Выбранная машина не найдена"

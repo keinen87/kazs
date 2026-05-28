@@ -154,10 +154,15 @@
                 <h3>📦 Выдача топлива (КАЗС)</h3>
                 <div class="total-litres">{{ total_litres|floatformat:3 }} л</div>
                 {% if selected_user.month_limit is not None %}
-                <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
-                <div class="remaining-info">⏳ Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
+                    {% if remaining is not None %}
+                        <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
+                        <div class="remaining-info">⏳ Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
+                    {% else %}
+                        <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
+                        <div class="remaining-info" style="color: #6c757d;">Остаток по лимиту доступен только для периода внутри одного месяца</div>
+                    {% endif %}
                 {% else %}
-                <div class="limit-info">Лимит не задан</div>
+                    <div class="limit-info">Лимит не задан</div>
                 {% endif %}
                 <div class="info">
                     {{ selected_user.full_name }}<br>
