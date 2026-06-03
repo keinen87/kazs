@@ -87,6 +87,17 @@
             font-size: 1rem;
             margin-top: 10px;
         }
+        .fuel-level-info {
+            font-size: 1rem;
+            margin-top: 10px;
+            font-weight: bold;
+            color: #28a745;
+        }
+        .fuel-level-time {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 2px;
+        }
         .info {
             margin-top: 15px;
             font-size: 0.9rem;
@@ -176,15 +187,27 @@
                     <div class="not-connected-message">Техника не подключена к Fort Monitor</div>
                 {% else %}
                     {% if fortmonitor_total is None %}
-                        <div class="no-data-message">Нет данных за период</div>
+                        <div class="no-data-message">Нет данных о заправках за период</div>
                     {% else %}
                         <div class="fortmonitor-info">{{ fortmonitor_total|floatformat:3 }} л</div>
                         {% if fortmonitor_total == 0 or fortmonitor_total > 65000 %}
                             <div class="warning-note">⚠️ Возможно, система не настроена</div>
                         {% endif %}
                     {% endif %}
+
+                    {% if fuel_level is not None %}
+                        <div class="fuel-level-info">⛽ Остаток в баке: {{ fuel_level|floatformat:3 }} л</div>
+                        {% if fuel_level_time %}
+                            <div class="fuel-level-time">({{ fuel_level_time|date:"d.m.Y H:i:s" }})</div>
+                        {% else %}
+                            <div class="fuel-level-time">⏱️ время последнего измерения неизвестно</div>
+                        {% endif %}
+                    {% elif is_mapped %}
+                        <div class="fuel-level-info" style="color: #6c757d;">Остаток в баке: нет данных</div>
+                    {% endif %}
+
                     <div class="fm-link">
-                        <a href="{{ fm_report_url }}" target="_blank">📌 Посмотреть подробный отчёт Fort Monitor</a>
+                        <a href="{{ fm_report_url }}" target="_blank">📌 Перейти на сервер Fort Monitor</a>
                     </div>
                 {% endif %}
             </div>

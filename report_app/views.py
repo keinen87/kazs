@@ -3,7 +3,7 @@ from django.core.paginator import Paginator
 from django.db.models import Sum
 from django.http import JsonResponse
 from .models import LevelMetersData, Fillings, Users
-from datetime import datetime
+from datetime import datetime, timedelta
 from calendar import monthrange
 import requests
 import memcache
@@ -107,6 +107,84 @@ def get_total_fortmonitor_fuelings(vehicle_id: str, date_from: datetime, date_to
     total = sum(f['volume'] for f in fuelings if f.get('fuel_type') == 'fueling')
     return total
 
+def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None):
+    """
+    Возвращает кортеж (endLevel, last_event_time).
+    - endLevel: остаток топлива в баке (литры)
+    - last_event_time: datetime максимального stop_time из всех событий датчиков (заправок/сливов)
+      за последние 30 дней от reference_date (или от текущей даты).
+    Если событий нет, last_event_time = None.
+    """
+    if reference_date is None:
+        reference_date = datetime.now()
+    # Берём период 30 дней до reference_date, чтобы наверняка поймать последнее событие
+    date_from = reference_date - timedelta(days=30)
+    date_to = reference_date
+    cache_key = f"fm_fuel_level_{vehicle_id}_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}"
+    mc = memcache.Client([FM_MC_SERVER], debug=0)
+    cached = mc.get(cache_key)
+    if cached is not None:
+        return cached
+
+    session_id = get_valid_session()
+    url = FM_URL_TEMPLATE + "getobjectsfuelinfo"
+    headers = {"SessionId": session_id}
+    params = {
+        "objuids": vehicle_id,
+        "date_from": date_from.strftime("%Y-%m-%d 00:00:00"),
+        "date_to": date_to.strftime("%Y-%m-%d 23:59:59")
+    }
+    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    if not data or not isinstance(data, list):
+        return (None, None)
+
+    obj = next((item for item in data if str(item.get('object_id')) == str(vehicle_id)), None)
+    if not obj or 'sensors' not in obj:
+        return (None, None)
+
+    sensors = obj['sensors']
+    # Ищем датчик-сумматор
+    sum_sensor = next((s for s in sensors if s.get('sensor_name') == 'Сумматор датчиков уровня топлива'), None)
+    if sum_sensor:
+        end_level = sum_sensor.get('endLevel')
+        # Собираем все stop_time из fuelings этого датчика (и всех других тоже, но для простоты – из всех датчиков)
+        # Пройдёмся по всем датчикам, соберём stop_time
+        last_event_time = None
+        for sensor in sensors:
+            for fueling in sensor.get('fuelings', []):
+                stop_time_str = fueling.get('stop_time')
+                if stop_time_str:
+                    try:
+                        dt = datetime.strptime(stop_time_str, '%Y-%m-%d %H:%M:%S')
+                        if last_event_time is None or dt > last_event_time:
+                            last_event_time = dt
+                    except:
+                        pass
+        result = (end_level, last_event_time)
+        mc.set(cache_key, result, time=900)
+        return result
+    else:
+        # Берём первый датчик уровня топлива
+        level_sensor = next((s for s in sensors if 'Датчик уровня топлива' in s.get('sensor_name', '')), None)
+        if not level_sensor:
+            return (None, None)
+        end_level = level_sensor.get('endLevel')
+        last_event_time = None
+        for fueling in level_sensor.get('fuelings', []):
+            stop_time_str = fueling.get('stop_time')
+            if stop_time_str:
+                try:
+                    dt = datetime.strptime(stop_time_str, '%Y-%m-%d %H:%M:%S')
+                    if last_event_time is None or dt > last_event_time:
+                        last_event_time = dt
+                except:
+                    pass
+        result = (end_level, last_event_time)
+        mc.set(cache_key, result, time=900)
+        return result
+
 # ---------------------- Данные по уровнемерам ----------------------
 def get_fuel_balance_data():
     desired_ids = [1, 2, 3, 4]
@@ -207,6 +285,7 @@ def fillings_list(request):
     }
     return render(request, 'fillings_list.html', context)
 
+# ---------------------- Отчёт по выдаче топлива и заправкам ----------------------
 def fuel_report(request):
     users = Users.objects.filter(
         id__in=Fillings.objects.filter(litre__gt=0).values('id_user').distinct()
@@ -222,6 +301,8 @@ def fuel_report(request):
     error = None
     fortmonitor_total = None
     is_mapped = False
+    fuel_level = None          # литры остатка
+    fuel_level_time = None     # дата/время последнего события
 
     if selected_user_id and date_from_str and date_to_str:
         try:
@@ -229,7 +310,6 @@ def fuel_report(request):
             date_from = datetime.strptime(date_from_str, '%Y-%m-%d')
             date_to = datetime.strptime(date_to_str, '%Y-%m-%d')
             
-            # Проверка: начальная дата не должна быть позже конечной
             if date_from > date_to:
                 error = "Ошибка: начальная дата не может быть позже конечной."
             else:
@@ -245,33 +325,27 @@ def fuel_report(request):
                 ).aggregate(total=Sum('litre'))['total']
                 total_litres = total if total is not None else 0
 
-                # Логика для остатка по лимиту (только если пользователь не в SKIP_USER_IDS)
+                # Остаток по лимиту
                 if selected_user.id not in SKIP_USER_IDS and selected_user.month_limit is not None:
-                    # Проверяем, что выбранный период целиком внутри одного календарного месяца
                     if date_from.year == date_to.year and date_from.month == date_to.month:
-                        # Берём первый и последний день этого месяца
                         month_start = datetime(date_from.year, date_from.month, 1)
                         last_day = monthrange(date_from.year, date_from.month)[1]
                         month_end = datetime(date_from.year, date_from.month, last_day, 23, 59, 59)
                         ticks_month_start = datetime_to_ticks(month_start)
                         ticks_month_end = datetime_to_ticks(month_end)
-                        
-                        # Сумма выдач за весь месяц
                         total_month = Fillings.objects.filter(
                             id_user=selected_user,
                             litre__gt=0,
                             date_time__gte=ticks_month_start,
                             date_time__lte=ticks_month_end
                         ).aggregate(total=Sum('litre'))['total'] or 0
-                        
                         remaining = selected_user.month_limit - total_month
                     else:
-                        # Период пересекает границу месяцев – остаток не показываем
                         remaining = None
                 else:
                     remaining = None
 
-                # FortMonitor (без изменений)
+                # FortMonitor: заправки и остаток
                 vehicle_id = None
                 for vid, name in VEHICLE_MAP.items():
                     if name == selected_user.short_name:
@@ -281,11 +355,17 @@ def fuel_report(request):
                 if vehicle_id:
                     try:
                         fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
+                        # Получаем остаток и время последнего события (за 30 дней до date_to)
+                        fuel_level, fuel_level_time = get_fortmonitor_fuel_level(vehicle_id, reference_date=date_to)
                     except Exception as e:
                         print(f"FortMonitor error: {e}")
                         fortmonitor_total = None
+                        fuel_level = None
+                        fuel_level_time = None
                 else:
                     fortmonitor_total = None
+                    fuel_level = None
+                    fuel_level_time = None
 
         except Users.DoesNotExist:
             error = "Выбранная машина не найдена"
@@ -303,6 +383,8 @@ def fuel_report(request):
         'error': error,
         'fortmonitor_total': fortmonitor_total,
         'is_mapped': is_mapped,
+        'fuel_level': fuel_level,
+        'fuel_level_time': fuel_level_time,
         'fm_report_url': FM_REPORT_URL,
         'vehicle_names': list(VEHICLE_MAP.values()),
     }
