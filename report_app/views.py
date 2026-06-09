@@ -116,8 +116,8 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
     Если событий нет, last_event_time = None.
 
     Специальная логика:
-    - Для vehicle_id='24' (Rimpull 1) – принудительно суммируем все датчики с названием, содержащим "Бак"
-      (так как датчики называются "Бак 1" и "Бак 2"). Если таких нет – суммируем все датчики, кроме сумматора.
+    - Для vehicle_id='24' (Rimpull 1) и '25' (Rimpull 3) – принудительно суммируем все датчики,
+      чьё название начинается с "Бак" (например, "Бак 1", "Бак 2").
     - Для всех остальных – используем датчик "Сумматор датчиков уровня топлива",
       или первый датчик с 'Датчик уровня топлива'.
     """
@@ -151,21 +151,18 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
 
     sensors = obj['sensors']
 
-    # --- КОСТЫЛЬ: для Rimpull 1 (vehicle_id='24') суммируем датчики "Бак 1" и "Бак 2" ---
-    if vehicle_id == '24':
+    # --- КОСТЫЛЬ: для Rimpull 1 и Rimpull 3 суммируем датчики "Бак" ---
+    if vehicle_id in ('24', '25'):
         total_level = 0.0
-        # Ищем датчики, в названии которых есть "Бак"
-        level_sensors = [s for s in sensors if 'Бак' in s.get('sensor_name', '')]
-        # Если не нашли – берём все датчики, кроме явного сумматора (на всякий случай)
-        if not level_sensors:
-            level_sensors = [s for s in sensors if s.get('sensor_name') != 'Сумматор датчиков уровня топлива']
-        for s in level_sensors:
-            end = s.get('endLevel')
-            if end is not None:
-                total_level += end
+        for s in sensors:
+            name = s.get('sensor_name', '')
+            if name.startswith('Бак'):   # "Бак 1", "Бак 2" и т.д.
+                end = s.get('endLevel')
+                if end is not None:
+                    total_level += end
         end_level = total_level
 
-        # Время последнего события – из всех датчиков
+        # Время последнего события из всех датчиков
         last_event_time = None
         for sensor in sensors:
             for fueling in sensor.get('fuelings', []):
@@ -182,11 +179,9 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
         return result
 
     # --- Обычная логика (для всех остальных машин) ---
-    # Ищем датчик-сумматор
     sum_sensor = next((s for s in sensors if s.get('sensor_name') == 'Сумматор датчиков уровня топлива'), None)
     if sum_sensor:
         end_level = sum_sensor.get('endLevel')
-        # Собираем все stop_time из fuelings всех датчиков
         last_event_time = None
         for sensor in sensors:
             for fueling in sensor.get('fuelings', []):
@@ -202,7 +197,6 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
         mc.set(cache_key, result, time=900)
         return result
     else:
-        # Если нет сумматора, берём первый датчик с 'Датчик уровня топлива'
         level_sensor = next((s for s in sensors if 'Датчик уровня топлива' in s.get('sensor_name', '')), None)
         if not level_sensor:
             return (None, None)
