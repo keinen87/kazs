@@ -93,11 +93,6 @@
             font-weight: bold;
             color: #28a745;
         }
-        .fuel-level-time {
-            font-size: 0.85rem;
-            color: #6c757d;
-            margin-top: 2px;
-        }
         .info {
             margin-top: 15px;
             font-size: 0.9rem;
@@ -162,14 +157,14 @@
         {% if total_litres is not None %}
         <div class="results-row">
             <div class="result-card">
-                <h3>📦 Выдача топлива (КАЗС)</h3>
+                <h3>Выдача топлива (КАЗС)</h3>
                 <div class="total-litres">{{ total_litres|floatformat:3 }} л</div>
                 {% if selected_user.month_limit is not None %}
                     {% if remaining is not None %}
-                        <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
-                        <div class="remaining-info">⏳ Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
+                        <div class="limit-info">Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
+                        <div class="remaining-info">Остаток по лимиту: {{ remaining|floatformat:3 }} л</div>
                     {% else %}
-                        <div class="limit-info">📅 Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
+                        <div class="limit-info">Месячный лимит: {{ selected_user.month_limit|floatformat:0 }} л</div>
                         <div class="remaining-info" style="color: #6c757d;">Остаток по лимиту доступен только для периода внутри одного месяца</div>
                     {% endif %}
                 {% else %}
@@ -182,7 +177,7 @@
             </div>
 
             <div class="result-card">
-                <h3>⛽ Заправки в технику (FortMonitor)</h3>
+                <h3>Заправки в технику (FortMonitor)</h3>
                 {% if not is_mapped %}
                     <div class="not-connected-message">Техника не подключена к Fort Monitor</div>
                 {% else %}
@@ -196,18 +191,13 @@
                     {% endif %}
 
                     {% if fuel_level is not None %}
-                        <div class="fuel-level-info">⛽ Остаток в баке: {{ fuel_level|floatformat:3 }} л</div>
-                        {% if fuel_level_time %}
-                            <div class="fuel-level-time">({{ fuel_level_time|date:"d.m.Y H:i:s" }})</div>
-                        {% else %}
-                            <div class="fuel-level-time">⏱️ время последнего измерения неизвестно</div>
-                        {% endif %}
+                        <div class="fuel-level-info">Остаток в баке: {{ fuel_level|floatformat:2 }} л</div>
                     {% elif is_mapped %}
                         <div class="fuel-level-info" style="color: #6c757d;">Остаток в баке: нет данных</div>
                     {% endif %}
 
                     <div class="fm-link">
-                        <a href="{{ fm_report_url }}" target="_blank">📌 Перейти на сервер Fort Monitor</a>
+                        <a href="{{ fm_report_url }}" target="_blank">Перейти на сервер Fort Monitor</a>
                     </div>
                 {% endif %}
             </div>

@@ -107,24 +107,19 @@ def get_total_fortmonitor_fuelings(vehicle_id: str, date_from: datetime, date_to
     total = sum(f['volume'] for f in fuelings if f.get('fuel_type') == 'fueling')
     return total
 
-def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None):
+def get_fortmonitor_fuel_level(vehicle_id: str, date_from: datetime, date_to: datetime):
     """
     Возвращает кортеж (endLevel, last_event_time).
-    - endLevel: остаток топлива в баке (литры)
-    - last_event_time: datetime максимального stop_time из всех событий датчиков (заправок/сливов)
-      за последние 30 дней от reference_date (или от текущей даты).
-    Если событий нет, last_event_time = None.
+    - endLevel: остаток топлива в баке (литры) на дату date_to (конец периода).
+    - last_event_time: datetime максимального stop_time из всех событий (заправок/сливов)
+      в пределах периода [date_from, date_to]. Если событий нет, last_event_time = None.
 
-    Специальная логика:
-    - Для vehicle_id='24' (Rimpull 1) и '25' (Rimpull 3) – принудительно суммируем все датчики,
-      чьё название начинается с "Бак" (например, "Бак 1", "Бак 2").
-    - Для всех остальных – используем датчик "Сумматор датчиков уровня топлива",
-      или первый датчик с 'Датчик уровня топлива'.
+    Логика выбора датчика:
+        * Если есть датчик с точным именем "Датчик уровня топлива" – берём его endLevel.
+        * Иначе находим все датчики, название которых начинается с "Бак" (Бак 1, Бак 2...).
+          Исключаем значения 0 и 1 (считаем ошибочными), вычисляем среднее арифметическое.
+        * Если ничего не найдено – возвращаем (None, None).
     """
-    if reference_date is None:
-        reference_date = datetime.now()
-    date_from = reference_date - timedelta(days=30)
-    date_to = reference_date
     cache_key = f"fm_fuel_level_{vehicle_id}_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}"
     mc = memcache.Client([FM_MC_SERVER], debug=0)
     cached = mc.get(cache_key)
@@ -150,59 +145,28 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
         return (None, None)
 
     sensors = obj['sensors']
+    end_level = None
+    last_event_time = None
 
-    # --- КОСТЫЛЬ: для Rimpull 1 и Rimpull 3 суммируем датчики "Бак" ---
-    if vehicle_id in ('24', '25'):
-        total_level = 0.0
-        for s in sensors:
-            name = s.get('sensor_name', '')
-            if name.startswith('Бак'):   # "Бак 1", "Бак 2" и т.д.
-                end = s.get('endLevel')
-                if end is not None:
-                    total_level += end
-        end_level = total_level
-
-        # Время последнего события из всех датчиков
-        last_event_time = None
-        for sensor in sensors:
-            for fueling in sensor.get('fuelings', []):
-                stop_time_str = fueling.get('stop_time')
-                if stop_time_str:
-                    try:
-                        dt = datetime.strptime(stop_time_str, '%Y-%m-%d %H:%M:%S')
-                        if last_event_time is None or dt > last_event_time:
-                            last_event_time = dt
-                    except:
-                        pass
-        result = (end_level, last_event_time)
-        mc.set(cache_key, result, time=900)
-        return result
-
-    # --- Обычная логика (для всех остальных машин) ---
-    sum_sensor = next((s for s in sensors if s.get('sensor_name') == 'Сумматор датчиков уровня топлива'), None)
-    if sum_sensor:
-        end_level = sum_sensor.get('endLevel')
-        last_event_time = None
-        for sensor in sensors:
-            for fueling in sensor.get('fuelings', []):
-                stop_time_str = fueling.get('stop_time')
-                if stop_time_str:
-                    try:
-                        dt = datetime.strptime(stop_time_str, '%Y-%m-%d %H:%M:%S')
-                        if last_event_time is None or dt > last_event_time:
-                            last_event_time = dt
-                    except:
-                        pass
-        result = (end_level, last_event_time)
-        mc.set(cache_key, result, time=900)
-        return result
+    # 1. Ищем точное совпадение "Датчик уровня топлива"
+    exact_sensor = next((s for s in sensors if s.get('sensor_name') == 'Датчик уровня топлива'), None)
+    if exact_sensor:
+        end_level = exact_sensor.get('endLevel')
     else:
-        level_sensor = next((s for s in sensors if 'Датчик уровня топлива' in s.get('sensor_name', '')), None)
-        if not level_sensor:
-            return (None, None)
-        end_level = level_sensor.get('endLevel')
-        last_event_time = None
-        for fueling in level_sensor.get('fuelings', []):
+        # 2. Ищем датчики, начинающиеся с "Бак"
+        tank_sensors = [s for s in sensors if s.get('sensor_name', '').startswith('Бак')]
+        valid_levels = []
+        for s in tank_sensors:
+            level = s.get('endLevel')
+            # Игнорируем 0 или 1 (недостоверные значения)
+            if level is not None and level > 1:
+                valid_levels.append(level)
+        if valid_levels:
+            end_level = sum(valid_levels) / len(valid_levels)
+
+    # Определяем время последнего события в пределах периода
+    for sensor in sensors:
+        for fueling in sensor.get('fuelings', []):
             stop_time_str = fueling.get('stop_time')
             if stop_time_str:
                 try:
@@ -211,9 +175,10 @@ def get_fortmonitor_fuel_level(vehicle_id: str, reference_date: datetime = None)
                         last_event_time = dt
                 except:
                     pass
-        result = (end_level, last_event_time)
-        mc.set(cache_key, result, time=900)
-        return result
+
+    result = (end_level, last_event_time)
+    mc.set(cache_key, result, time=900)
+    return result
 
 # ---------------------- Данные по уровнемерам ----------------------
 def get_fuel_balance_data():
@@ -385,8 +350,9 @@ def fuel_report(request):
                 if vehicle_id:
                     try:
                         fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
-                        # Получаем остаток и время последнего события (за 30 дней до date_to)
-                        fuel_level, fuel_level_time = get_fortmonitor_fuel_level(vehicle_id, reference_date=date_to)
+                        # Для остатка на конец периода используем date_from и date_to
+                        # Чтобы получить endLevel именно на date_to, передаём весь период.
+                        fuel_level, fuel_level_time = get_fortmonitor_fuel_level(vehicle_id, date_from, date_to)
                     except Exception as e:
                         print(f"FortMonitor error: {e}")
                         fortmonitor_total = None
