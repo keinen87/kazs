@@ -14,6 +14,7 @@ FM_URL_TEMPLATE = "http://31.173.168.107:8080/api/integration/v1/"
 FM_LOGIN = "bassol_api"
 FM_PASSWORD = "Bassl22052026"
 FM_MC_SERVER = '127.0.0.1:11211'
+FM_CACHE_TIMEOUT = 300   # 5 минут для кэширования данных заправок и остатков
 
 VEHICLE_MAP = {
     '8': 'Hino',
@@ -49,6 +50,7 @@ def ticks_to_datetime(ticks):
     except (ValueError, OverflowError, OSError):
         return None
 
+
 def datetime_to_ticks(dt):
     epoch_ticks = 621355968000000000
     seconds = dt.timestamp()
@@ -62,19 +64,23 @@ def get_session_id() -> str:
     resp.raise_for_status()
     return resp.headers["SessionId"]
 
+
 def get_session_status(session_id: str) -> bool:
     url = FM_URL_TEMPLATE + "ping"
     headers = {"SessionId": session_id}
     resp = requests.get(url, headers=headers, timeout=5)
     return resp.text.strip().lower() == "true"
 
+
 def get_valid_session() -> str:
     mc = memcache.Client([FM_MC_SERVER], debug=0)
     session_id = mc.get("fortmonitor_session_id")
     if not session_id or not get_session_status(session_id):
         session_id = get_session_id()
+        # Сессию храним 15 минут (стандартное время жизни)
         mc.set("fortmonitor_session_id", session_id, time=900)
     return session_id
+
 
 def get_fuelings_from_fortmonitor(vehicle_id: str, date_from: datetime, date_to: datetime) -> list:
     cache_key = f"fm_fuelings_{vehicle_id}_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}"
@@ -99,13 +105,15 @@ def get_fuelings_from_fortmonitor(vehicle_id: str, date_from: datetime, date_to:
     if data.get("result") != "Ok":
         raise Exception(f"API error: {data.get('result')}")
     fuelings = data.get("fuelings", [])
-    mc.set(cache_key, fuelings, time=900)
+    mc.set(cache_key, fuelings, time=FM_CACHE_TIMEOUT)
     return fuelings
+
 
 def get_total_fortmonitor_fuelings(vehicle_id: str, date_from: datetime, date_to: datetime) -> float:
     fuelings = get_fuelings_from_fortmonitor(vehicle_id, date_from, date_to)
     total = sum(f['volume'] for f in fuelings if f.get('fuel_type') == 'fueling')
     return total
+
 
 def get_fortmonitor_fuel_level(vehicle_id: str, date_from: datetime, date_to: datetime):
     """
@@ -177,7 +185,7 @@ def get_fortmonitor_fuel_level(vehicle_id: str, date_from: datetime, date_to: da
                     pass
 
     result = (end_level, last_event_time)
-    mc.set(cache_key, result, time=900)
+    mc.set(cache_key, result, time=FM_CACHE_TIMEOUT)
     return result
 
 # ---------------------- Данные по уровнемерам ----------------------
@@ -219,6 +227,7 @@ def get_fuel_balance_data():
         'total_volume': int(total_liters),
         'measurements': measurements,
     }
+
 
 def fuel_balance_api(request):
     data = get_fuel_balance_data()
@@ -351,7 +360,6 @@ def fuel_report(request):
                     try:
                         fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
                         # Для остатка на конец периода используем date_from и date_to
-                        # Чтобы получить endLevel именно на date_to, передаём весь период.
                         fuel_level, fuel_level_time = get_fortmonitor_fuel_level(vehicle_id, date_from, date_to)
                     except Exception as e:
                         print(f"FortMonitor error: {e}")
