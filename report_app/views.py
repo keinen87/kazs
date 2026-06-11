@@ -123,9 +123,13 @@ def get_fortmonitor_fuel_level(vehicle_id: str, date_from: datetime, date_to: da
       в пределах периода [date_from, date_to]. Если событий нет, last_event_time = None.
 
     Логика выбора датчика:
-        * Если есть датчик с точным именем "Датчик уровня топлива" – берём его endLevel.
-        * Иначе находим все датчики, название которых начинается с "Бак" (Бак 1, Бак 2...).
-          Исключаем значения 0 и 1 (считаем ошибочными), вычисляем среднее арифметическое.
+        * Сначала ищем все датчики, в названии которых есть "Датчик уровня топлива"
+          (например, "Датчик уровня топлива", "Датчик уровня топлива 1", "Датчик уровня топлива 2").
+          Из них берём endLevel, отбрасывая недостоверные значения (0 или 1).
+          Если есть хотя бы одно валидное значение, вычисляем среднее арифметическое.
+        * Если таких датчиков нет, ищем датчики, название которых начинается с "Бак"
+          (например, "Бак 1", "Бак 2").
+          Аналогично отбрасываем 0/1 и усредняем.
         * Если ничего не найдено – возвращаем (None, None).
     """
     cache_key = f"fm_fuel_level_{vehicle_id}_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}"
@@ -156,23 +160,27 @@ def get_fortmonitor_fuel_level(vehicle_id: str, date_from: datetime, date_to: da
     end_level = None
     last_event_time = None
 
-    # 1. Ищем точное совпадение "Датчик уровня топлива"
-    exact_sensor = next((s for s in sensors if s.get('sensor_name') == 'Датчик уровня топлива'), None)
-    if exact_sensor:
-        end_level = exact_sensor.get('endLevel')
+    # --- Сначала ищем датчики, содержащие "Датчик уровня топлива" ---
+    level_sensors = [s for s in sensors if 'Датчик уровня топлива' in s.get('sensor_name', '')]
+    valid_levels = []
+    for s in level_sensors:
+        level = s.get('endLevel')
+        if level is not None and level > 1:   # игнорируем 0 и 1
+            valid_levels.append(level)
+    if valid_levels:
+        end_level = sum(valid_levels) / len(valid_levels)
     else:
-        # 2. Ищем датчики, начинающиеся с "Бак"
+        # --- Иначе ищем датчики, начинающиеся с "Бак" ---
         tank_sensors = [s for s in sensors if s.get('sensor_name', '').startswith('Бак')]
         valid_levels = []
         for s in tank_sensors:
             level = s.get('endLevel')
-            # Игнорируем 0 или 1 (недостоверные значения)
             if level is not None and level > 1:
                 valid_levels.append(level)
         if valid_levels:
             end_level = sum(valid_levels) / len(valid_levels)
 
-    # Определяем время последнего события в пределах периода
+    # Определяем время последнего события в пределах периода (из всех датчиков)
     for sensor in sensors:
         for fueling in sensor.get('fuelings', []):
             stop_time_str = fueling.get('stop_time')
