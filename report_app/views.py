@@ -77,7 +77,6 @@ def get_valid_session() -> str:
     session_id = mc.get("fortmonitor_session_id")
     if not session_id or not get_session_status(session_id):
         session_id = get_session_id()
-        # Сессию храним 15 минут (стандартное время жизни)
         mc.set("fortmonitor_session_id", session_id, time=900)
     return session_id
 
@@ -269,6 +268,12 @@ def fillings_list(request):
 
     for filling in fillings:
         user = filling.id_user
+        # Пропускаем записи с невалидной датой (None или 0)
+        if not filling.date_time or filling.date_time <= 0:
+            filling.month_limit = None
+            filling.remaining = None
+            continue
+
         if filling.dt and filling.dt < LIMIT_START_DATE:
             filling.month_limit = None
             filling.remaining = None
@@ -313,8 +318,8 @@ def fuel_report(request):
     error = None
     fortmonitor_total = None
     is_mapped = False
-    fuel_level = None          # литры остатка
-    fuel_level_time = None     # дата/время последнего события
+    fuel_level = None
+    fuel_level_time = None
 
     if selected_user_id and date_from_str and date_to_str:
         try:
@@ -357,7 +362,7 @@ def fuel_report(request):
                 else:
                     remaining = None
 
-                # FortMonitor: заправки и остаток
+                # FortMonitor
                 vehicle_id = None
                 for vid, name in VEHICLE_MAP.items():
                     if name == selected_user.short_name:
@@ -367,7 +372,6 @@ def fuel_report(request):
                 if vehicle_id:
                     try:
                         fortmonitor_total = get_total_fortmonitor_fuelings(vehicle_id, date_from, date_to)
-                        # Для остатка на конец периода используем date_from и date_to
                         fuel_level, fuel_level_time = get_fortmonitor_fuel_level(vehicle_id, date_from, date_to)
                     except Exception as e:
                         print(f"FortMonitor error: {e}")
