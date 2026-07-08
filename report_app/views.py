@@ -258,6 +258,7 @@ def fillings_list(request):
     month_start = datetime(now.year, now.month, 1)
     ticks_month_start = datetime_to_ticks(month_start)
 
+    # Преобразуем даты и проставляем лимит пользователя
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
         user = filling.id_user
@@ -266,29 +267,26 @@ def fillings_list(request):
         else:
             filling.month_limit = None
 
+    # Расчёт остатка на момент заправки с проверкой всех условий
     for filling in fillings:
         user = filling.id_user
-        # Пропускаем записи с невалидной датой (None или 0)
-        if not filling.date_time or filling.date_time <= 0:
-            filling.month_limit = None
+        # Проверяем все условия, при которых остаток не вычисляется
+        if (user is None or
+            user.id in SKIP_USER_IDS or
+            filling.month_limit is None or
+            filling.date_time is None or
+            filling.date_time <= 0 or
+            (filling.dt and filling.dt < LIMIT_START_DATE)):
             filling.remaining = None
             continue
 
-        if filling.dt and filling.dt < LIMIT_START_DATE:
-            filling.month_limit = None
-            filling.remaining = None
-            continue
-
-        if (user and user.id not in SKIP_USER_IDS and filling.month_limit is not None):
-            spent_up_to_date = Fillings.objects.filter(
-                id_user=user,
-                litre__gt=0,
-                date_time__gte=ticks_month_start,
-                date_time__lte=filling.date_time
-            ).aggregate(total=Sum('litre'))['total'] or 0
-            filling.remaining = filling.month_limit - spent_up_to_date
-        else:
-            filling.remaining = None
+        spent_up_to_date = Fillings.objects.filter(
+            id_user=user,
+            litre__gt=0,
+            date_time__gte=ticks_month_start,
+            date_time__lte=filling.date_time
+        ).aggregate(total=Sum('litre'))['total'] or 0
+        filling.remaining = filling.month_limit - spent_up_to_date
 
     paginator = Paginator(fillings, 20)
     page_number = request.GET.get('page')
