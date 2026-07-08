@@ -254,7 +254,11 @@ def fillings_list(request):
 
     fillings = fillings.order_by('-date_time')
 
-    # Преобразуем даты и проставляем лимит пользователя (остаток не вычисляем)
+    now = datetime.now()
+    month_start = datetime(now.year, now.month, 1)
+    ticks_month_start = datetime_to_ticks(month_start)
+
+    # Преобразуем даты и проставляем лимит пользователя
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
         user = filling.id_user
@@ -262,8 +266,50 @@ def fillings_list(request):
             filling.month_limit = user.month_limit
         else:
             filling.month_limit = None
-        # Остаток всегда None (безопасно для продакшена)
+
+    # Получаем идентификаторы пользователей, для которых будем считать расход за месяц
+    user_ids = set()
+    for filling in fillings:
+        user = filling.id_user
+        if (user is not None and
+            user.id not in SKIP_USER_IDS and
+            filling.month_limit is not None and
+            filling.date_time is not None and
+            filling.date_time > 0 and
+            filling.dt and
+            filling.dt >= LIMIT_START_DATE):
+            user_ids.add(user.id)
+
+    # Один запрос для получения суммы литров за месяц по каждому пользователю
+    if user_ids:
+        month_expenses = {
+            item['id_user']: item['total']
+            for item in Fillings.objects.filter(
+                id_user__in=user_ids,
+                litre__gt=0,
+                date_time__gte=ticks_month_start,
+                date_time__isnull=False,
+                date_time__gt=0
+            ).values('id_user').annotate(total=Sum('litre'))
+        }
+    else:
+        month_expenses = {}
+
+    # Вычисляем остаток для каждой заправки
+    for filling in fillings:
+        user = filling.id_user
         filling.remaining = None
+        if (user is None or
+            user.id in SKIP_USER_IDS or
+            filling.month_limit is None or
+            filling.date_time is None or
+            filling.date_time <= 0 or
+            not filling.dt or
+            filling.dt < LIMIT_START_DATE):
+            continue
+
+        spent = month_expenses.get(user.id, 0)
+        filling.remaining = filling.month_limit - spent
 
     paginator = Paginator(fillings, 20)
     page_number = request.GET.get('page')
