@@ -254,11 +254,7 @@ def fillings_list(request):
 
     fillings = fillings.order_by('-date_time')
 
-    now = datetime.now()
-    month_start = datetime(now.year, now.month, 1)
-    ticks_month_start = datetime_to_ticks(month_start)
-
-    # Преобразуем даты и проставляем лимит пользователя
+    # Преобразуем даты и проставляем лимит пользователя (остаток не вычисляем)
     for filling in fillings:
         filling.dt = ticks_to_datetime(filling.date_time)
         user = filling.id_user
@@ -266,34 +262,8 @@ def fillings_list(request):
             filling.month_limit = user.month_limit
         else:
             filling.month_limit = None
-
-    # Расчёт остатка на момент заправки с обработкой ошибок
-    for filling in fillings:
-        user = filling.id_user
-        # Сбрасываем остаток по умолчанию
+        # Остаток всегда None (безопасно для продакшена)
         filling.remaining = None
-
-        # Проверяем все условия, при которых остаток не вычисляется
-        if (user is None or
-            user.id in SKIP_USER_IDS or
-            filling.month_limit is None or
-            filling.date_time is None or
-            filling.date_time <= 0 or
-            (filling.dt and filling.dt < LIMIT_START_DATE)):
-            continue
-
-        try:
-            spent_up_to_date = Fillings.objects.filter(
-                id_user=user,
-                litre__gt=0,
-                date_time__gte=ticks_month_start,
-                date_time__lte=filling.date_time
-            ).aggregate(total=Sum('litre'))['total'] or 0
-            filling.remaining = filling.month_limit - spent_up_to_date
-        except Exception as e:
-            # Если возникает ошибка (например, из-за неверного типа date_time), логируем и пропускаем
-            print(f"Error calculating remaining for filling {filling.id}: {e}")
-            filling.remaining = None
 
     paginator = Paginator(fillings, 20)
     page_number = request.GET.get('page')
