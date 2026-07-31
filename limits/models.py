@@ -1,6 +1,8 @@
 # limits/models.py
 
 from django.db import models
+from report_app.models import Users
+
 
 class WeekLimit(models.Model):
     user_id = models.IntegerField(verbose_name="ID техники", db_index=True)
@@ -19,4 +21,8 @@ class WeekLimit(models.Model):
         verbose_name_plural = "Недельные лимиты"
 
     def __str__(self):
-        return f"User {self.user_id} week {self.week_start}"
+        try:
+            user = Users.objects.get(id=self.user_id)
+            return f"{user.full_name} – {self.week_start}"
+        except Users.DoesNotExist:
+            return f"User {self.user_id} – {self.week_start}"

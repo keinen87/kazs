@@ -79,21 +79,6 @@ def limits_page(request):
         for item in expense_qs:
             expenses_month[item['id_user']] = float(item['total'])
 
-    # Расход до конца недели
-    ticks_week_end = datetime_to_ticks(date_to_datetime(week_end, 23, 59, 59))
-    expenses_up_to_week = {}
-    if users.exists():
-        expense_qs = Fillings.objects.filter(
-            id_user__in=users,
-            litre__gt=0,
-            date_time__gte=ticks_month_start,
-            date_time__lte=ticks_week_end,
-            date_time__isnull=False,
-            date_time__gt=0
-        ).values('id_user').annotate(total=Sum('litre'))
-        for item in expense_qs:
-            expenses_up_to_week[item['id_user']] = float(item['total'])
-
     # Загружаем сохранённые недельные лимиты
     week_limits = {
         wl.user_id: wl
@@ -156,7 +141,7 @@ def save_weekly_limit(request):
 
         base_limit = user.month_limit or 0.0
         weekly_limit = float(weekly_limit)
-        week_remaining = float(week_remaining)
+        week_remaining_current = float(week_remaining)
 
         prev_week = WeekLimit.objects.filter(
             user_id=user_id,
@@ -171,7 +156,8 @@ def save_weekly_limit(request):
             burned = max(0, prev_remaining)
             cumulative = prev_cumulative + weekly_limit - burned
         else:
-            cumulative = base_limit + weekly_limit
+            burned = max(0, week_remaining_current)
+            cumulative = base_limit + weekly_limit - burned
 
         week_limit_obj, created = WeekLimit.objects.get_or_create(
             user_id=user_id,
@@ -180,20 +166,20 @@ def save_weekly_limit(request):
                 'week_end': week_end,
                 'weekly_limit': weekly_limit,
                 'new_month_limit': cumulative,
-                'week_remaining': week_remaining,
+                'week_remaining': week_remaining_current,
             }
         )
         if not created:
             week_limit_obj.weekly_limit = weekly_limit
             week_limit_obj.new_month_limit = cumulative
-            week_limit_obj.week_remaining = week_remaining
+            week_limit_obj.week_remaining = week_remaining_current
             week_limit_obj.save()
 
         return JsonResponse({
             'status': 'ok',
             'new_month_limit': cumulative,
             'weekly_limit': weekly_limit,
-            'week_remaining': week_remaining,
+            'week_remaining': week_remaining_current,
             'week_start': week_start.strftime('%Y-%m-%d'),
         })
     except Exception as e:
@@ -216,10 +202,18 @@ def save_all_limits(request):
             week_start_str = row.get('week_start')
             weekly_limit = row.get('weekly_limit')
             week_remaining = row.get('week_remaining')
-            if user_id is None or week_start_str is None or weekly_limit is None or week_remaining is None:
+            if user_id is None or week_start_str is None or week_remaining is None:
                 continue
-            if weekly_limit is None or weekly_limit == '':
+
+            # Определяем, задан ли недельный лимит
+            if weekly_limit is None or weekly_limit == '' or float(weekly_limit) <= 0:
+                is_auto = True
+                # weekly_limit сохраняем как 1 для базы (но не используется в расчёте)
                 weekly_limit = 1.0
+            else:
+                weekly_limit = float(weekly_limit)
+                is_auto = False
+
             try:
                 selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
                 week_start = get_monday(selected_date)
@@ -229,8 +223,7 @@ def save_all_limits(request):
             user = Users.objects.get(id=user_id)
 
             base_limit = user.month_limit or 0.0
-            weekly_limit = float(weekly_limit)
-            week_remaining = float(week_remaining)
+            week_remaining_current = float(week_remaining)
 
             prev_week = WeekLimit.objects.filter(
                 user_id=user_id,
@@ -239,13 +232,21 @@ def save_all_limits(request):
                 week_start__month=week_start.month
             ).order_by('-week_start').first()
 
-            if prev_week:
-                prev_cumulative = float(prev_week.new_month_limit or base_limit)
-                prev_remaining = float(prev_week.week_remaining or 0)
-                burned = max(0, prev_remaining)
-                cumulative = prev_cumulative + weekly_limit - burned
+            if is_auto:
+                # Лимит не задан: новый = base_limit + 1 (но если base_limit == 1, оставляем 1)
+                if base_limit == 1:
+                    cumulative = 1.0
+                else:
+                    cumulative = base_limit + 1.0
             else:
-                cumulative = base_limit + weekly_limit
+                if prev_week:
+                    prev_cumulative = float(prev_week.new_month_limit or base_limit)
+                    prev_remaining = float(prev_week.week_remaining or 0)
+                    burned = max(0, prev_remaining)
+                    cumulative = prev_cumulative + weekly_limit - burned
+                else:
+                    burned = max(0, week_remaining_current)
+                    cumulative = base_limit + weekly_limit - burned
 
             week_limit_obj, created = WeekLimit.objects.get_or_create(
                 user_id=user_id,
@@ -254,13 +255,13 @@ def save_all_limits(request):
                     'week_end': week_end,
                     'weekly_limit': weekly_limit,
                     'new_month_limit': cumulative,
-                    'week_remaining': week_remaining,
+                    'week_remaining': week_remaining_current,
                 }
             )
             if not created:
                 week_limit_obj.weekly_limit = weekly_limit
                 week_limit_obj.new_month_limit = cumulative
-                week_limit_obj.week_remaining = week_remaining
+                week_limit_obj.week_remaining = week_remaining_current
                 week_limit_obj.save()
             updated.append(user_id)
 
@@ -271,7 +272,6 @@ def save_all_limits(request):
 
 @login_required
 def backup_limits(request):
-    """Бэкап текущих лимитов (скачать JSON)"""
     if request.method != 'GET':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
@@ -315,7 +315,6 @@ def backup_limits(request):
 
 @login_required
 def sync_limits_to_postgres(request):
-    """Записать новые месячные лимиты в базу PostgreSQL"""
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
@@ -325,10 +324,12 @@ def sync_limits_to_postgres(request):
         if not week_start_str:
             return JsonResponse({'status': 'error', 'message': 'Missing week_start'}, status=400)
 
-        selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-        week_start = get_monday(selected_date)
+        try:
+            selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+            week_start = get_monday(selected_date)
+        except ValueError:
+            return JsonResponse({'status': 'error', 'message': 'Invalid date format'}, status=400)
 
-        # Получаем все записи WeekLimit для этой недели
         week_limits = WeekLimit.objects.filter(week_start=week_start)
         if not week_limits.exists():
             return JsonResponse({'status': 'error', 'message': 'No limits found for this week'}, status=400)
@@ -338,7 +339,7 @@ def sync_limits_to_postgres(request):
             user = Users.objects.filter(id=wl.user_id).first()
             if user and wl.new_month_limit is not None:
                 user.month_limit = wl.new_month_limit
-                user.save(using='default')  # явно сохраняем в базу default (PostgreSQL)
+                user.save(using='default')
                 updated_count += 1
 
         return JsonResponse({'status': 'ok', 'updated': updated_count})
