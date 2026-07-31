@@ -16,7 +16,7 @@
             text-align: center;
             color: #333;
         }
-        .week-selector {
+        .period-selector {
             display: flex;
             justify-content: center;
             align-items: center;
@@ -24,13 +24,13 @@
             margin: 20px 0;
             flex-wrap: wrap;
         }
-        .week-selector input[type="date"] {
+        .period-selector input[type="date"] {
             padding: 6px;
             font-size: 1rem;
             border: 1px solid #ccc;
             border-radius: 4px;
         }
-        .week-selector button {
+        .period-selector button {
             padding: 6px 15px;
             background-color: #007bff;
             color: white;
@@ -38,7 +38,7 @@
             border-radius: 4px;
             cursor: pointer;
         }
-        .week-selector button:hover {
+        .period-selector button:hover {
             background-color: #0056b3;
         }
         .actions {
@@ -114,7 +114,7 @@
         .highlight-green {
             background-color: #d4edda !important;
         }
-        .new-limit-value, .week-remaining-value {
+        .new-limit-value, .remaining-value {
             font-weight: bold;
             color: #155724;
         }
@@ -178,21 +178,23 @@
     <div class="container">
         <h1>Лимиты по технике</h1>
 
-        <div class="week-selector">
+        <div class="period-selector">
             <form method="get" action="">
-                <label for="week_start">Выберите дату (любой день недели):</label>
-                <input type="date" id="week_start" name="week_start" value="{{ week_start|date:'Y-m-d' }}">
+                <label for="date_from">С:</label>
+                <input type="date" id="date_from" name="date_from" value="{{ date_from|date:'Y-m-d' }}">
+                <label for="date_to">По:</label>
+                <input type="date" id="date_to" name="date_to" value="{{ date_to|date:'Y-m-d' }}">
                 <button type="submit">Показать</button>
             </form>
-            <span>Неделя: {{ week_start|date:"d.m.Y" }} – {{ week_end|date:"d.m.Y" }}</span>
+            <span>Период: {{ date_from|date:"d.m.Y" }} – {{ date_to|date:"d.m.Y" }}</span>
         </div>
 
         <div class="actions">
-            {% if user.is_authenticated and not is_past_week %}
+            {% if user.is_authenticated and is_editable %}
                 <button class="btn-save-all" onclick="showConfirmModal('save_all')">Сохранить всё</button>
             {% endif %}
             <button class="btn-backup" onclick="backupLimits()">Бэкап текущих лимитов</button>
-            {% if user.is_authenticated and not is_past_week %}
+            {% if user.is_authenticated and is_editable %}
                 <button class="btn-sync" onclick="showConfirmModal('sync')">Записать лимиты в базу КАЗС</button>
             {% endif %}
         </div>
@@ -204,9 +206,9 @@
                     <th>Техника (машина)</th>
                     <th>Текущий лимит (л/мес)</th>
                     <th>Текущий остаток по лимиту (л)</th>
-                    <th>Недельный лимит на {{ week_start|date:"d.m.Y" }} – {{ week_end|date:"d.m.Y" }}</th>
+                    <th>Лимит на период ({{ date_from|date:"d.m" }} – {{ date_to|date:"d.m" }})</th>
                     <th>Суммарный лимит за {{ month_name }} месяц</th>
-                    <th>Остаток на конец недели</th>
+                    <th>Остаток на конец периода</th>
                     <th>Действие</th>
                 </tr>
             </thead>
@@ -216,40 +218,19 @@
                     <td>{{ forloop.counter }}</td>
                     <td>{{ item.user.full_name }}</td>
                     <td>
-                        {% if item.base_limit is not None %}
-                            {{ item.base_limit|floatformat:0 }}
-                        {% else %}
+                        {% if is_past_period %}
                             —
-                        {% endif %}
-                    </td>
-                    <td class="remaining-month-cell">
-                        {% if item.remaining_month is not None %}
-                            {{ item.remaining_month|floatformat:3 }}
                         {% else %}
-                            —
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if is_past_week %}
-                            {% if item.weekly_limit is not None %}
-                                {{ item.weekly_limit|floatformat:0 }}
+                            {% if item.base_limit is not None %}
+                                {{ item.base_limit|floatformat:0 }}
                             {% else %}
                                 —
                             {% endif %}
-                        {% else %}
-                            <input type="number" class="weekly-input" step="any" min="0" placeholder="0" value="{% if item.weekly_limit is not None %}{{ item.weekly_limit }}{% endif %}">
                         {% endif %}
                     </td>
-                    <td class="new-limit-cell">
-                        {% if item.new_month_limit is not None %}
-                            <span class="new-limit-value">{{ item.new_month_limit|floatformat:3 }}</span>
-                        {% else %}
+                    <td class="remaining-month-cell">
+                        {% if is_past_period %}
                             —
-                        {% endif %}
-                    </td>
-                    <td class="week-remaining-cell">
-                        {% if item.week_remaining is not None %}
-                            <span class="week-remaining-value">{{ item.week_remaining|floatformat:3 }}</span>
                         {% else %}
                             {% if item.remaining_month is not None %}
                                 {{ item.remaining_month|floatformat:3 }}
@@ -259,11 +240,36 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if is_past_week %}
+                        {% if is_past_period %}
+                            {% if item.period_limit is not None %}
+                                {{ item.period_limit|floatformat:0 }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        {% else %}
+                            <input type="number" class="period-input" step="any" min="0" placeholder="0" value="{% if item.period_limit is not None %}{{ item.period_limit }}{% endif %}">
+                        {% endif %}
+                    </td>
+                    <td class="new-limit-cell">
+                        {% if item.new_month_limit is not None %}
+                            <span class="new-limit-value">{{ item.new_month_limit|floatformat:3 }}</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td class="remaining-cell">
+                        {% if item.remaining_at_period_end is not None %}
+                            <span class="remaining-value">{{ item.remaining_at_period_end|floatformat:3 }}</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if is_past_period %}
                             <span style="color: #6c757d; font-size: 0.9rem;">—</span>
                         {% else %}
                             {% if user.is_authenticated %}
-                                <button class="btn-calc" onclick="calculateRow(this, '{{ week_start|date:'Y-m-d' }}')">Рассчитать</button>
+                                <button class="btn-calc" onclick="calculateRow(this)">Рассчитать</button>
                             {% else %}
                                 <span style="color: #6c757d; font-size: 0.9rem;">только чтение</span>
                             {% endif %}
@@ -281,7 +287,7 @@
             {% if not user.is_authenticated %}
                 <p>Для редактирования лимитов <a href="/admin/login/">войдите в систему</a>.</p>
             {% endif %}
-            Период: {{ week_start|date:"d.m.Y" }} – {{ week_end|date:"d.m.Y" }}
+            Период: {{ date_from|date:"d.m.Y" }} – {{ date_to|date:"d.m.Y" }}
         </div>
     </div>
 
@@ -298,24 +304,26 @@
     <script>
         var pendingAction = null;
 
-        function calculateRow(button, weekStart) {
+        function calculateRow(button) {
             var row = button.closest('tr');
-            var weeklyInput = row.querySelector('.weekly-input');
-            var weeklyValue = parseFloat(weeklyInput.value);
-            if (isNaN(weeklyValue) || weeklyValue < 0) {
+            var periodInput = row.querySelector('.period-input');
+            var periodValue = parseFloat(periodInput.value);
+            if (isNaN(periodValue) || periodValue < 0) {
                 alert('Введите корректное положительное число.');
                 return;
             }
 
             var userId = row.dataset.userId;
+            var dateFrom = document.getElementById('date_from').value;
+            var dateTo = document.getElementById('date_to').value;
             var remainingCell = row.querySelector('.remaining-month-cell');
             var remainingText = remainingCell.textContent.trim();
-            var weekRemaining = parseFloat(remainingText);
-            if (isNaN(weekRemaining)) {
-                weekRemaining = 0;
+            var remainingMonth = parseFloat(remainingText);
+            if (isNaN(remainingMonth)) {
+                remainingMonth = 0;
             }
 
-            fetch('/limits/save-weekly-limit/', {
+            fetch('/limits/save-period-limit/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -323,9 +331,10 @@
                 },
                 body: JSON.stringify({
                     user_id: parseInt(userId),
-                    week_start: weekStart,
-                    weekly_limit: weeklyValue,
-                    week_remaining: weekRemaining
+                    date_from: dateFrom,
+                    date_to: dateTo,
+                    period_limit: periodValue,
+                    remaining_month: remainingMonth
                 })
             })
             .then(response => response.json())
@@ -333,10 +342,10 @@
                 if (data.status === 'ok') {
                     var newLimitCell = row.querySelector('.new-limit-cell');
                     newLimitCell.innerHTML = `<span class="new-limit-value">${data.new_month_limit.toFixed(3)}</span>`;
-                    var weekRemainingCell = row.querySelector('.week-remaining-cell');
-                    weekRemainingCell.innerHTML = `<span class="week-remaining-value">${data.week_remaining.toFixed(3)}</span>`;
+                    var remainingCell = row.querySelector('.remaining-cell');
+                    remainingCell.innerHTML = `<span class="remaining-value">${data.remaining_at_period_end.toFixed(3)}</span>`;
                     row.classList.add('highlight-green');
-                    document.getElementById('saveStatus').textContent = '✅ Лимит сохранён для недели ' + data.week_start;
+                    document.getElementById('saveStatus').textContent = '✅ Лимит сохранён для периода ' + dateFrom + ' – ' + dateTo;
                 } else {
                     document.getElementById('saveStatus').textContent = '❌ Ошибка: ' + data.message;
                 }
@@ -355,12 +364,12 @@
 
             if (action === 'save_all') {
                 title.textContent = 'Всё проверено?';
-                message.textContent = 'Вы уверены, что хотите сохранить все лимиты для недели {{ week_start|date:"d.m.Y" }} – {{ week_end|date:"d.m.Y" }}?';
+                message.textContent = 'Вы уверены, что хотите сохранить все лимиты для периода ' + document.getElementById('date_from').value + ' – ' + document.getElementById('date_to').value + '?';
                 confirmBtn.textContent = 'Да, сохранить';
                 confirmBtn.onclick = function() { confirmSaveAll(); };
             } else if (action === 'sync') {
                 title.textContent = 'Запись в базу КАЗС';
-                message.textContent = 'Вы уверены, что хотите записать новые месячные лимиты в базу КАЗС для недели {{ week_start|date:"d.m.Y" }} – {{ week_end|date:"d.m.Y" }}?';
+                message.textContent = 'Вы уверены, что хотите записать новые месячные лимиты в базу КАЗС для периода ' + document.getElementById('date_from').value + ' – ' + document.getElementById('date_to').value + '?';
                 confirmBtn.textContent = 'Да, записать';
                 confirmBtn.onclick = function() { confirmSync(); };
             }
@@ -373,35 +382,36 @@
         }
 
         function confirmSaveAll() {
-            // Логика сохранения всех лимитов (как ранее)
             var rows = document.querySelectorAll('#limitTable tbody tr');
             var data = [];
-            var weekStart = document.getElementById('week_start').value;
+            var dateFrom = document.getElementById('date_from').value;
+            var dateTo = document.getElementById('date_to').value;
             rows.forEach(row => {
                 var userId = row.dataset.userId;
-                var weeklyInput = row.querySelector('.weekly-input');
-                var weeklyValue = weeklyInput.value.trim();
-                if (weeklyValue === '') {
-                    weeklyValue = 1;
+                var periodInput = row.querySelector('.period-input');
+                var periodValue = periodInput.value.trim();
+                if (periodValue === '') {
+                    periodValue = 1;
                 } else {
-                    var val = parseFloat(weeklyValue);
+                    var val = parseFloat(periodValue);
                     if (isNaN(val) || val < 0) {
-                        weeklyValue = 1;
+                        periodValue = 1;
                     } else {
-                        weeklyValue = val;
+                        periodValue = val;
                     }
                 }
                 var remainingCell = row.querySelector('.remaining-month-cell');
                 var remainingText = remainingCell.textContent.trim();
-                var weekRemaining = parseFloat(remainingText);
-                if (isNaN(weekRemaining)) {
-                    weekRemaining = 0;
+                var remainingMonth = parseFloat(remainingText);
+                if (isNaN(remainingMonth)) {
+                    remainingMonth = 0;
                 }
                 data.push({
                     user_id: parseInt(userId),
-                    week_start: weekStart,
-                    weekly_limit: parseFloat(weeklyValue),
-                    week_remaining: weekRemaining
+                    date_from: dateFrom,
+                    date_to: dateTo,
+                    period_limit: parseFloat(periodValue),
+                    remaining_month: remainingMonth
                 });
             });
 
@@ -435,14 +445,15 @@
         }
 
         function confirmSync() {
-            var weekStart = document.getElementById('week_start').value;
+            var dateFrom = document.getElementById('date_from').value;
+            var dateTo = document.getElementById('date_to').value;
             fetch('/limits/sync-limits-to-postgres/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
                 },
-                body: JSON.stringify({ week_start: weekStart })
+                body: JSON.stringify({ date_from: dateFrom, date_to: dateTo })
             })
             .then(response => response.json())
             .then(data => {
@@ -459,12 +470,13 @@
         }
 
         function backupLimits() {
-            var weekStart = document.getElementById('week_start').value;
-            if (!weekStart) {
-                alert('Выберите неделю.');
+            var dateFrom = document.getElementById('date_from').value;
+            var dateTo = document.getElementById('date_to').value;
+            if (!dateFrom || !dateTo) {
+                alert('Выберите период.');
                 return;
             }
-            window.location.href = '/limits/backup-limits/?week_start=' + weekStart;
+            window.location.href = '/limits/backup-limits/?date_from=' + dateFrom + '&date_to=' + dateTo;
         }
 
         function getCookie(name) {

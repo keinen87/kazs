@@ -8,7 +8,7 @@ from django.utils.timezone import now
 from datetime import datetime, timedelta
 from report_app.models import Users, Fillings
 from report_app.views import datetime_to_ticks, SKIP_USER_IDS
-from .models import WeekLimit
+from .models import PeriodLimit
 import json
 import io
 
@@ -20,22 +20,10 @@ MONTH_NAMES = {
 }
 
 
-def get_monday(date):
-    if isinstance(date, datetime):
-        date = date.date()
-    return date - timedelta(days=date.weekday())
-
-
 def get_month_start(date):
     if isinstance(date, datetime):
         date = date.date()
     return datetime(date.year, date.month, 1).date()
-
-
-def get_week_end(week_start):
-    if isinstance(week_start, datetime):
-        week_start = week_start.date()
-    return week_start + timedelta(days=6)
 
 
 def date_to_datetime(d, hour=0, minute=0, second=0):
@@ -44,28 +32,38 @@ def date_to_datetime(d, hour=0, minute=0, second=0):
 
 def limits_page(request):
     today = datetime.now().date()
-    week_start_str = request.GET.get('week_start')
-    if week_start_str:
+    date_from_str = request.GET.get('date_from')
+    date_to_str = request.GET.get('date_to')
+    
+    if date_from_str and date_to_str:
         try:
-            selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-            week_start = get_monday(selected_date)
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+            date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
         except ValueError:
-            week_start = get_monday(today)
+            # Если даты невалидны, берём текущий месяц
+            date_from = get_month_start(today)
+            date_to = today
     else:
-        week_start = get_monday(today)
+        # По умолчанию текущий месяц
+        date_from = get_month_start(today)
+        date_to = today
 
-    week_end = get_week_end(week_start)
-    current_monday = get_monday(today)
-    is_past_week = week_start < current_monday
-    month_name = MONTH_NAMES.get(week_start.month, '')
+    # Проверка, что период не выходит за пределы одного месяца
+    is_same_month = (date_from.year == date_to.year and date_from.month == date_to.month)
+    # Для истории разрешаем просматривать только текущий месяц
+    # Для редактирования разрешаем только будущие периоды
+    # Для простоты мы показываем редактирование только для периодов в будущем или текущем месяце,
+    # если дата_до <= сегодня
+    is_past_period = date_to < today
+    is_editable = not is_past_period and is_same_month
 
     users = Users.objects.exclude(id__in=SKIP_USER_IDS).order_by('full_name')
 
+    # Расход за текущий месяц (для остатка по лимиту)
     month_start = get_month_start(today)
     ticks_month_start = datetime_to_ticks(date_to_datetime(month_start, 0, 0, 0))
     ticks_today = datetime_to_ticks(now())
 
-    # Расход за месяц
     expenses_month = {}
     if users.exists():
         expense_qs = Fillings.objects.filter(
@@ -79,10 +77,10 @@ def limits_page(request):
         for item in expense_qs:
             expenses_month[item['id_user']] = float(item['total'])
 
-    # Загружаем сохранённые недельные лимиты
-    week_limits = {
-        wl.user_id: wl
-        for wl in WeekLimit.objects.filter(week_start=week_start)
+    # Загружаем сохранённые лимиты для выбранного периода
+    period_limits = {
+        pl.user_id: pl
+        for pl in PeriodLimit.objects.filter(date_from=date_from, date_to=date_to)
     }
 
     data = []
@@ -91,96 +89,99 @@ def limits_page(request):
         spent_month = expenses_month.get(user.id, 0)
         remaining_month = base_limit - spent_month if base_limit is not None else None
 
-        wl = week_limits.get(user.id)
-        if wl:
-            weekly_limit = wl.weekly_limit
-            new_month_limit = wl.new_month_limit
-            week_remaining = wl.week_remaining
+        pl = period_limits.get(user.id)
+        if pl:
+            period_limit = pl.period_limit
+            new_month_limit = pl.new_month_limit
+            remaining_at_period_end = pl.remaining_at_period_end
         else:
-            weekly_limit = None
+            period_limit = None
             new_month_limit = None
-            week_remaining = None
+            remaining_at_period_end = None
 
         data.append({
             'user': user,
             'base_limit': base_limit,
             'remaining_month': remaining_month,
-            'weekly_limit': weekly_limit,
+            'period_limit': period_limit,
             'new_month_limit': new_month_limit,
-            'week_remaining': week_remaining,
+            'remaining_at_period_end': remaining_at_period_end,
         })
 
     context = {
         'data': data,
-        'week_start': week_start,
-        'week_end': week_end,
+        'date_from': date_from,
+        'date_to': date_to,
         'now': now(),
-        'is_past_week': is_past_week,
-        'month_name': month_name,
+        'is_editable': is_editable,
+        'is_past_period': is_past_period,
+        'month_name': MONTH_NAMES.get(date_from.month, ''),
     }
     return render(request, 'limits.html', context)
 
 
 @login_required
-def save_weekly_limit(request):
+def save_period_limit(request):
     if request.method != 'POST':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
     try:
         body = json.loads(request.body)
         user_id = body.get('user_id')
-        week_start_str = body.get('week_start')
-        weekly_limit = body.get('weekly_limit')
-        week_remaining = body.get('week_remaining')
-        if user_id is None or week_start_str is None or weekly_limit is None or week_remaining is None:
+        date_from_str = body.get('date_from')
+        date_to_str = body.get('date_to')
+        period_limit = body.get('period_limit')
+        remaining_month = body.get('remaining_month')  # текущий остаток на день сохранения
+        if user_id is None or date_from_str is None or date_to_str is None or period_limit is None or remaining_month is None:
             return JsonResponse({'status': 'error', 'message': 'Missing fields'}, status=400)
 
-        selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-        week_start = get_monday(selected_date)
-        week_end = get_week_end(week_start)
+        date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
         user = Users.objects.get(id=user_id)
 
         base_limit = user.month_limit or 0.0
-        weekly_limit = float(weekly_limit)
-        week_remaining_current = float(week_remaining)
+        period_limit = float(period_limit)
+        remaining_month = float(remaining_month)
 
-        prev_week = WeekLimit.objects.filter(
+        # Находим предыдущий период в этом же месяце
+        prev_period = PeriodLimit.objects.filter(
             user_id=user_id,
-            week_start__lt=week_start,
-            week_start__year=week_start.year,
-            week_start__month=week_start.month
-        ).order_by('-week_start').first()
+            date_to__lt=date_from,
+            date_from__year=date_from.year,
+            date_from__month=date_from.month
+        ).order_by('-date_to').first()
 
-        if prev_week:
-            prev_cumulative = float(prev_week.new_month_limit or base_limit)
-            prev_remaining = float(prev_week.week_remaining or 0)
+        if prev_period:
+            prev_cumulative = float(prev_period.new_month_limit or base_limit)
+            prev_remaining = float(prev_period.remaining_at_period_end or 0)
             burned = max(0, prev_remaining)
-            cumulative = prev_cumulative + weekly_limit - burned
+            cumulative = prev_cumulative + period_limit - burned
         else:
-            burned = max(0, week_remaining_current)
-            cumulative = base_limit + weekly_limit - burned
+            # Первый период в месяце
+            burned = max(0, remaining_month)
+            cumulative = base_limit + period_limit - burned
 
-        week_limit_obj, created = WeekLimit.objects.get_or_create(
+        # Сохраняем
+        period_limit_obj, created = PeriodLimit.objects.get_or_create(
             user_id=user_id,
-            week_start=week_start,
+            date_from=date_from,
+            date_to=date_to,
             defaults={
-                'week_end': week_end,
-                'weekly_limit': weekly_limit,
+                'period_limit': period_limit,
                 'new_month_limit': cumulative,
-                'week_remaining': week_remaining_current,
+                'remaining_at_period_end': remaining_month,
             }
         )
         if not created:
-            week_limit_obj.weekly_limit = weekly_limit
-            week_limit_obj.new_month_limit = cumulative
-            week_limit_obj.week_remaining = week_remaining_current
-            week_limit_obj.save()
+            period_limit_obj.period_limit = period_limit
+            period_limit_obj.new_month_limit = cumulative
+            period_limit_obj.remaining_at_period_end = remaining_month
+            period_limit_obj.save()
 
         return JsonResponse({
             'status': 'ok',
             'new_month_limit': cumulative,
-            'weekly_limit': weekly_limit,
-            'week_remaining': week_remaining_current,
-            'week_start': week_start.strftime('%Y-%m-%d'),
+            'period_limit': period_limit,
+            'remaining_at_period_end': remaining_month,
         })
     except Exception as e:
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
@@ -199,70 +200,66 @@ def save_all_limits(request):
         updated = []
         for row in rows:
             user_id = row.get('user_id')
-            week_start_str = row.get('week_start')
-            weekly_limit = row.get('weekly_limit')
-            week_remaining = row.get('week_remaining')
-            if user_id is None or week_start_str is None or week_remaining is None:
+            date_from_str = row.get('date_from')
+            date_to_str = row.get('date_to')
+            period_limit = row.get('period_limit')
+            remaining_month = row.get('remaining_month')
+            if user_id is None or date_from_str is None or date_to_str is None or remaining_month is None:
                 continue
 
-            # Определяем, задан ли недельный лимит
-            if weekly_limit is None or weekly_limit == '' or float(weekly_limit) <= 0:
+            if period_limit is None or period_limit == '' or float(period_limit) <= 0:
                 is_auto = True
-                # weekly_limit сохраняем как 1 для базы (но не используется в расчёте)
-                weekly_limit = 1.0
+                period_limit = 1.0
             else:
-                weekly_limit = float(weekly_limit)
+                period_limit = float(period_limit)
                 is_auto = False
 
             try:
-                selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-                week_start = get_monday(selected_date)
+                date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+                date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
             except ValueError:
                 continue
-            week_end = get_week_end(week_start)
             user = Users.objects.get(id=user_id)
 
             base_limit = user.month_limit or 0.0
-            week_remaining_current = float(week_remaining)
-
-            prev_week = WeekLimit.objects.filter(
-                user_id=user_id,
-                week_start__lt=week_start,
-                week_start__year=week_start.year,
-                week_start__month=week_start.month
-            ).order_by('-week_start').first()
+            remaining_month = float(remaining_month)
 
             if is_auto:
-                # Лимит не задан: новый = base_limit + 1 (но если base_limit == 1, оставляем 1)
                 if base_limit == 1:
                     cumulative = 1.0
                 else:
                     cumulative = base_limit + 1.0
             else:
-                if prev_week:
-                    prev_cumulative = float(prev_week.new_month_limit or base_limit)
-                    prev_remaining = float(prev_week.week_remaining or 0)
+                prev_period = PeriodLimit.objects.filter(
+                    user_id=user_id,
+                    date_to__lt=date_from,
+                    date_from__year=date_from.year,
+                    date_from__month=date_from.month
+                ).order_by('-date_to').first()
+                if prev_period:
+                    prev_cumulative = float(prev_period.new_month_limit or base_limit)
+                    prev_remaining = float(prev_period.remaining_at_period_end or 0)
                     burned = max(0, prev_remaining)
-                    cumulative = prev_cumulative + weekly_limit - burned
+                    cumulative = prev_cumulative + period_limit - burned
                 else:
-                    burned = max(0, week_remaining_current)
-                    cumulative = base_limit + weekly_limit - burned
+                    burned = max(0, remaining_month)
+                    cumulative = base_limit + period_limit - burned
 
-            week_limit_obj, created = WeekLimit.objects.get_or_create(
+            period_limit_obj, created = PeriodLimit.objects.get_or_create(
                 user_id=user_id,
-                week_start=week_start,
+                date_from=date_from,
+                date_to=date_to,
                 defaults={
-                    'week_end': week_end,
-                    'weekly_limit': weekly_limit,
+                    'period_limit': period_limit,
                     'new_month_limit': cumulative,
-                    'week_remaining': week_remaining_current,
+                    'remaining_at_period_end': remaining_month,
                 }
             )
             if not created:
-                week_limit_obj.weekly_limit = weekly_limit
-                week_limit_obj.new_month_limit = cumulative
-                week_limit_obj.week_remaining = week_remaining_current
-                week_limit_obj.save()
+                period_limit_obj.period_limit = period_limit
+                period_limit_obj.new_month_limit = cumulative
+                period_limit_obj.remaining_at_period_end = remaining_month
+                period_limit_obj.save()
             updated.append(user_id)
 
         return JsonResponse({'status': 'ok', 'updated': updated})
@@ -275,35 +272,37 @@ def backup_limits(request):
     if request.method != 'GET':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
-    week_start_str = request.GET.get('week_start')
-    if not week_start_str:
-        return JsonResponse({'status': 'error', 'message': 'Missing week_start'}, status=400)
+    date_from_str = request.GET.get('date_from')
+    date_to_str = request.GET.get('date_to')
+    if not date_from_str or not date_to_str:
+        return JsonResponse({'status': 'error', 'message': 'Missing dates'}, status=400)
 
     try:
-        selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-        week_start = get_monday(selected_date)
+        date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
     except ValueError:
-        return JsonResponse({'status': 'error', 'message': 'Invalid date'}, status=400)
+        return JsonResponse({'status': 'error', 'message': 'Invalid date format'}, status=400)
 
-    week_limits = WeekLimit.objects.filter(week_start=week_start)
+    period_limits = PeriodLimit.objects.filter(date_from=date_from, date_to=date_to)
     data = []
-    for wl in week_limits:
-        user = Users.objects.filter(id=wl.user_id).first()
+    for pl in period_limits:
+        user = Users.objects.filter(id=pl.user_id).first()
         if user:
             data.append({
                 'user_id': user.id,
                 'user_name': user.full_name,
-                'month_limit': wl.new_month_limit,
+                'month_limit': pl.new_month_limit,
             })
 
     json_data = {
-        'week_start': week_start.strftime('%Y-%m-%d'),
+        'date_from': date_from.strftime('%Y-%m-%d'),
+        'date_to': date_to.strftime('%Y-%m-%d'),
         'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'data': data
     }
 
     json_str = json.dumps(json_data, ensure_ascii=False, indent=2)
-    filename = f"limits_backup_{week_start.strftime('%Y%m%d')}.json"
+    filename = f"limits_backup_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}.json"
     response = FileResponse(
         io.BytesIO(json_str.encode('utf-8')),
         content_type='application/json',
@@ -320,25 +319,23 @@ def sync_limits_to_postgres(request):
 
     try:
         body = json.loads(request.body)
-        week_start_str = body.get('week_start')
-        if not week_start_str:
-            return JsonResponse({'status': 'error', 'message': 'Missing week_start'}, status=400)
+        date_from_str = body.get('date_from')
+        date_to_str = body.get('date_to')
+        if not date_from_str or not date_to_str:
+            return JsonResponse({'status': 'error', 'message': 'Missing dates'}, status=400)
 
-        try:
-            selected_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
-            week_start = get_monday(selected_date)
-        except ValueError:
-            return JsonResponse({'status': 'error', 'message': 'Invalid date format'}, status=400)
+        date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
+        date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
 
-        week_limits = WeekLimit.objects.filter(week_start=week_start)
-        if not week_limits.exists():
-            return JsonResponse({'status': 'error', 'message': 'No limits found for this week'}, status=400)
+        period_limits = PeriodLimit.objects.filter(date_from=date_from, date_to=date_to)
+        if not period_limits.exists():
+            return JsonResponse({'status': 'error', 'message': 'No limits found for this period'}, status=400)
 
         updated_count = 0
-        for wl in week_limits:
-            user = Users.objects.filter(id=wl.user_id).first()
-            if user and wl.new_month_limit is not None:
-                user.month_limit = wl.new_month_limit
+        for pl in period_limits:
+            user = Users.objects.filter(id=pl.user_id).first()
+            if user and pl.new_month_limit is not None:
+                user.month_limit = pl.new_month_limit
                 user.save(using='default')
                 updated_count += 1
 
