@@ -453,3 +453,8 @@ def fuel_report(request):
         'vehicle_names': list(VEHICLE_MAP.values()),
     }
     return render(request, 'fuel_report.html', context)
+
+def kazs_status_api(request):
+    """Возвращает JSON с состоянием КАЗС для AJAX-обновления"""
+    online = check_kazs_online()
+    return JsonResponse({'online': online})    

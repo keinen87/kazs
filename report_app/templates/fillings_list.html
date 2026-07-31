@@ -87,12 +87,16 @@
             border-radius: 50%;
             display: inline-block;
             flex-shrink: 0;
+            transition: background-color 0.3s ease;
         }
         .status-green {
             background-color: #28a745;
         }
         .status-red {
             background-color: #dc3545;
+        }
+        .status-text {
+            transition: color 0.3s ease;
         }
         .search-form {
             display: flex;
@@ -171,12 +175,8 @@
 
     <div class="search-row">
         <div class="kazs-status">
-            <span class="status-light {% if kazs_online %}status-green{% else %}status-red{% endif %}"></span>
-            {% if kazs_online %}
-                КАЗС включена
-            {% else %}
-                КАЗС выключена
-            {% endif %}
+            <span class="status-light status-green" id="kazsLight"></span>
+            <span class="status-text" id="kazsText">КАЗС включена</span>
         </div>
         <div class="search-form">
             <form method="get" action="" onsubmit="showLoading()">
@@ -261,6 +261,7 @@
     </div>
 
     <script>
+        // Обновление остатков топлива
         function updateFuelBalance() {
             fetch('/api/fuel-balance/')
                 .then(response => {
@@ -287,6 +288,43 @@
                 })
                 .catch(error => console.error('Ошибка обновления остатков:', error));
         }
+
+        // Обновление статуса КАЗС
+        function updateKazsStatus() {
+            fetch('/api/kazs-status/')
+                .then(response => {
+                    if (!response.ok) throw new Error('Ошибка сети');
+                    return response.json();
+                })
+                .then(data => {
+                    const light = document.getElementById('kazsLight');
+                    const text = document.getElementById('kazsText');
+                    if (data.online) {
+                        light.className = 'status-light status-green';
+                        text.textContent = 'КАЗС включена';
+                    } else {
+                        light.className = 'status-light status-red';
+                        text.textContent = 'КАЗС выключена';
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка обновления статуса КАЗС:', error);
+                    const light = document.getElementById('kazsLight');
+                    const text = document.getElementById('kazsText');
+                    light.className = 'status-light status-red';
+                    text.textContent = 'Статус КАЗС неизвестен';
+                });
+        }
+
+        // Запускаем при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            updateKazsStatus();
+        });
+
+        // Обновляем статус КАЗС каждые 10 секунд
+        setInterval(updateKazsStatus, 10000);
+
+        // Обновляем остатки каждые 30 секунд
         setInterval(updateFuelBalance, 30000);
     </script>
 {% endblock %}
