@@ -66,9 +66,38 @@
             color: #6c757d;
             font-style: italic;
         }
-        .search-form {
+        .search-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             margin: 20px 0 10px;
-            text-align: right;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .kazs-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9rem;
+            color: #333;
+        }
+        .status-light {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .status-green {
+            background-color: #28a745;
+        }
+        .status-red {
+            background-color: #dc3545;
+        }
+        .search-form {
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         .search-form input[type="text"] {
             padding: 6px 12px;
@@ -140,14 +169,24 @@
         </div>
     </div>
 
-    <div class="search-form">
-        <form method="get" action="" onsubmit="showLoading()">
-            <input type="text" name="search" placeholder="Поиск по машине..." value="{{ search_query }}">
-            <button type="submit">Найти</button>
-            {% if search_query %}
-                <a href="?"><button type="button" class="clear-btn">Сбросить</button></a>
+    <div class="search-row">
+        <div class="kazs-status">
+            <span class="status-light {% if kazs_online %}status-green{% else %}status-red{% endif %}"></span>
+            {% if kazs_online %}
+                КАЗС включена
+            {% else %}
+                КАЗС выключена
             {% endif %}
-        </form>
+        </div>
+        <div class="search-form">
+            <form method="get" action="" onsubmit="showLoading()">
+                <input type="text" name="search" placeholder="Поиск по машине..." value="{{ search_query }}">
+                <button type="submit">Найти</button>
+                {% if search_query %}
+                    <a href="?"><button type="button" class="clear-btn">Сбросить</button></a>
+                {% endif %}
+            </form>
+        </div>
     </div>
 
     <table>

@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from calendar import monthrange
 import requests
 import memcache
+import subprocess
+import platform
 
 # ---------------------- Константы FortMonitor ----------------------
 FM_REPORT_URL = "http://31.173.168.107:8080/"
@@ -37,6 +39,7 @@ VEHICLE_MAP = {
 # ---------------------- Константы приложения ----------------------
 SKIP_USER_IDS = {0, 1, 2, 3, 4, 5, 6, 39}
 LIMIT_START_DATE = datetime(2026, 5, 5)
+KAZS_IP = "192.168.24.27"  # IP-адрес КАЗС
 
 
 # ---------------------- Вспомогательные функции ----------------------
@@ -55,6 +58,27 @@ def datetime_to_ticks(dt):
     epoch_ticks = 621355968000000000
     seconds = dt.timestamp()
     return int(seconds * 10_000_000 + epoch_ticks)
+
+
+def check_kazs_online():
+    """Проверяет доступность КАЗС по IP с кэшированием в memcached (30 секунд)"""
+    mc = memcache.Client([FM_MC_SERVER], debug=0)
+    cache_key = "kazs_status"
+    cached = mc.get(cache_key)
+    if cached is not None:
+        return cached
+
+    ip = KAZS_IP
+    param = "-n" if platform.system().lower() == "windows" else "-c"
+    command = ["ping", param, "1", ip]
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
+        online = result.returncode == 0
+    except (subprocess.TimeoutExpired, Exception):
+        online = False
+
+    mc.set(cache_key, online, time=30)
+    return online
 
 # ---------------------- FortMonitor функции с кэшированием ----------------------
 def get_session_id() -> str:
@@ -315,11 +339,14 @@ def fillings_list(request):
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
+    kazs_online = check_kazs_online()
+
     context = {
         'page_obj': page_obj,
         'total_volume': balance_data['total_volume'],
         'measurements': balance_data['measurements'],
         'search_query': search_query,
+        'kazs_online': kazs_online,
     }
     return render(request, 'fillings_list.html', context)
 
