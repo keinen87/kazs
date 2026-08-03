@@ -470,13 +470,7 @@
         }
 
         function backupLimits() {
-            var dateFrom = document.getElementById('date_from').value;
-            var dateTo = document.getElementById('date_to').value;
-            if (!dateFrom || !dateTo) {
-                alert('Выберите период.');
-                return;
-            }
-            window.location.href = '/limits/backup-limits/?date_from=' + dateFrom + '&date_to=' + dateTo;
+            window.location.href = '/limits/backup-limits/';
         }
 
         function getCookie(name) {

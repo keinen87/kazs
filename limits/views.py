@@ -269,40 +269,30 @@ def save_all_limits(request):
 
 @login_required
 def backup_limits(request):
+    """
+    Создаёт JSON-бэкап всех техник с их текущими месячными лимитами из PostgreSQL.
+    """
     if request.method != 'GET':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
-    date_from_str = request.GET.get('date_from')
-    date_to_str = request.GET.get('date_to')
-    if not date_from_str or not date_to_str:
-        return JsonResponse({'status': 'error', 'message': 'Missing dates'}, status=400)
+    # Получаем всех пользователей, кроме исключённых
+    users = Users.objects.exclude(id__in=SKIP_USER_IDS).order_by('full_name')
 
-    try:
-        date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
-        date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
-    except ValueError:
-        return JsonResponse({'status': 'error', 'message': 'Invalid date format'}, status=400)
-
-    period_limits = PeriodLimit.objects.filter(date_from=date_from, date_to=date_to)
     data = []
-    for pl in period_limits:
-        user = Users.objects.filter(id=pl.user_id).first()
-        if user:
-            data.append({
-                'user_id': user.id,
-                'user_name': user.full_name,
-                'month_limit': pl.new_month_limit,
-            })
+    for user in users:
+        data.append({
+            'user_id': user.id,
+            'user_name': user.full_name,
+            'month_limit': float(user.month_limit) if user.month_limit is not None else None,
+        })
 
     json_data = {
-        'date_from': date_from.strftime('%Y-%m-%d'),
-        'date_to': date_to.strftime('%Y-%m-%d'),
         'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'data': data
     }
 
     json_str = json.dumps(json_data, ensure_ascii=False, indent=2)
-    filename = f"limits_backup_{date_from.strftime('%Y%m%d')}_{date_to.strftime('%Y%m%d')}.json"
+    filename = f"limits_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     response = FileResponse(
         io.BytesIO(json_str.encode('utf-8')),
         content_type='application/json',
