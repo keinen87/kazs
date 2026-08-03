@@ -27,6 +27,7 @@ DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
+KAZS_IP = os.getenv('KAZS_IP', '192.168.24.26')
 
 # Application definition
 
