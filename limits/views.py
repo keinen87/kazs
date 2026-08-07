@@ -1,5 +1,3 @@
-# limits/views.py
-
 from django.shortcuts import render
 from django.db.models import Sum
 from django.http import JsonResponse, FileResponse
@@ -40,26 +38,18 @@ def limits_page(request):
             date_from = datetime.strptime(date_from_str, '%Y-%m-%d').date()
             date_to = datetime.strptime(date_to_str, '%Y-%m-%d').date()
         except ValueError:
-            # Если даты невалидны, берём текущий месяц
             date_from = get_month_start(today)
             date_to = today
     else:
-        # По умолчанию текущий месяц
         date_from = get_month_start(today)
         date_to = today
 
-    # Проверка, что период не выходит за пределы одного месяца
     is_same_month = (date_from.year == date_to.year and date_from.month == date_to.month)
-    # Для истории разрешаем просматривать только текущий месяц
-    # Для редактирования разрешаем только будущие периоды
-    # Для простоты мы показываем редактирование только для периодов в будущем или текущем месяце,
-    # если дата_до <= сегодня
     is_past_period = date_to < today
     is_editable = not is_past_period and is_same_month
 
     users = Users.objects.exclude(id__in=SKIP_USER_IDS).order_by('full_name')
 
-    # Расход за текущий месяц (для остатка по лимиту)
     month_start = get_month_start(today)
     ticks_month_start = datetime_to_ticks(date_to_datetime(month_start, 0, 0, 0))
     ticks_today = datetime_to_ticks(now())
@@ -77,7 +67,6 @@ def limits_page(request):
         for item in expense_qs:
             expenses_month[item['id_user']] = float(item['total'])
 
-    # Загружаем сохранённые лимиты для выбранного периода
     period_limits = {
         pl.user_id: pl
         for pl in PeriodLimit.objects.filter(date_from=date_from, date_to=date_to)
@@ -130,7 +119,7 @@ def save_period_limit(request):
         date_from_str = body.get('date_from')
         date_to_str = body.get('date_to')
         period_limit = body.get('period_limit')
-        remaining_month = body.get('remaining_month')  # текущий остаток на день сохранения
+        remaining_month = body.get('remaining_month')
         if user_id is None or date_from_str is None or date_to_str is None or period_limit is None or remaining_month is None:
             return JsonResponse({'status': 'error', 'message': 'Missing fields'}, status=400)
 
@@ -142,7 +131,6 @@ def save_period_limit(request):
         period_limit = float(period_limit)
         remaining_month = float(remaining_month)
 
-        # Находим предыдущий период в этом же месяце
         prev_period = PeriodLimit.objects.filter(
             user_id=user_id,
             date_to__lt=date_from,
@@ -156,11 +144,9 @@ def save_period_limit(request):
             burned = max(0, prev_remaining)
             cumulative = prev_cumulative + period_limit - burned
         else:
-            # Первый период в месяце
             burned = max(0, remaining_month)
             cumulative = base_limit + period_limit - burned
 
-        # Сохраняем
         period_limit_obj, created = PeriodLimit.objects.get_or_create(
             user_id=user_id,
             date_from=date_from,
@@ -269,13 +255,9 @@ def save_all_limits(request):
 
 @login_required
 def backup_limits(request):
-    """
-    Создаёт JSON-бэкап всех техник с их текущими месячными лимитами из PostgreSQL.
-    """
     if request.method != 'GET':
         return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
-    # Получаем всех пользователей, кроме исключённых
     users = Users.objects.exclude(id__in=SKIP_USER_IDS).order_by('full_name')
 
     data = []
@@ -323,6 +305,9 @@ def sync_limits_to_postgres(request):
 
         updated_count = 0
         for pl in period_limits:
+            # Пропускаем пользователей из SKIP_USER_IDS
+            if pl.user_id in SKIP_USER_IDS:
+                continue
             user = Users.objects.filter(id=pl.user_id).first()
             if user and pl.new_month_limit is not None:
                 user.month_limit = pl.new_month_limit
