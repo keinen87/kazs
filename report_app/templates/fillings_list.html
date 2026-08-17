@@ -272,8 +272,8 @@
     </div>
 
     <script>
-        // Порог несливаемого остатка
-        const LOW_FUEL_THRESHOLD = 4250;
+        // Порог несливаемого остатка из контекста Django
+        const LOW_FUEL_THRESHOLD = {{ low_fuel_threshold }};
 
         function updateFuelBalance() {
             fetch('/api/fuel-balance/')
@@ -342,7 +342,6 @@
 
         // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
-            // Проверяем состояние сразу (для начального total_volume)
             const totalElement = document.querySelector('.total');
             const currentTotal = parseFloat(totalElement.innerText);
             const msgElement = document.getElementById('lowFuelMsg');
@@ -353,11 +352,9 @@
                 totalElement.classList.remove('total-red');
                 msgElement.style.display = 'none';
             }
-            // Запускаем AJAX-обновление статуса КАЗС
             updateKazsStatus();
         });
 
-        // Интервалы обновления
         setInterval(updateFuelBalance, 30000);
         setInterval(updateKazsStatus, 10000);
     </script>

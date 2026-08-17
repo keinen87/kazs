@@ -343,6 +343,7 @@ def fillings_list(request):
         'measurements': balance_data['measurements'],
         'search_query': search_query,
         'kazs_online': kazs_online,
+        'low_fuel_threshold': settings.LOW_FUEL_THRESHOLD,
     }
     return render(request, 'fillings_list.html', context)
 
