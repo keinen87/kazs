@@ -29,6 +29,7 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
 KAZS_IP = os.getenv('KAZS_IP', '192.168.24.26')
 LOW_FUEL_THRESHOLD = int(os.getenv('LOW_FUEL_THRESHOLD', 4300))
+WARNING_THRESHOLD = int(os.getenv('WARNING_THRESHOLD', 5300))
 
 # Application definition
 

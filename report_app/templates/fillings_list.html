@@ -20,18 +20,29 @@
         }
         .total {
             font-weight: bold;
-            color: #007bff;
             font-size: 2.5rem;
             letter-spacing: 2px;
             margin: 5px 0;
             line-height: 1.2;
             transition: color 0.3s ease;
         }
+        .total-normal {
+            color: #007bff;
+        }
+        .total-orange {
+            color: #fd7e14 !important;
+        }
         .total-red {
             color: #dc3545 !important;
         }
         .low-fuel-msg {
             color: #dc3545;
+            font-weight: bold;
+            margin-top: 5px;
+            font-size: 1.1rem;
+        }
+        .warning-msg {
+            color: #fd7e14;
             font-weight: bold;
             margin-top: 5px;
             font-size: 1.1rem;
@@ -149,7 +160,8 @@
 
     <div class="fuel-balance">
         <h3>Суммарный остаток топлива (л)</h3>
-        <div class="total" id="totalVolume">{{ total_volume }}</div>
+        <div class="total total-normal" id="totalVolume">{{ total_volume }}</div>
+        <div id="warningMsg" class="warning-msg" style="display: none;">Внимание! Через 1000 л. уровень топлива достигнет несливаемого остатка</div>
         <div id="lowFuelMsg" class="low-fuel-msg" style="display: none;">уровень топлива достигает несливаемого остатка</div>
         <div class="meters-grid">
             {% for m in measurements %}
@@ -272,8 +284,9 @@
     </div>
 
     <script>
-        // Порог несливаемого остатка из контекста Django
+        // Пороги из контекста Django
         const LOW_FUEL_THRESHOLD = {{ low_fuel_threshold }};
+        const WARNING_THRESHOLD = {{ warning_threshold }};
 
         function updateFuelBalance() {
             fetch('/api/fuel-balance/')
@@ -284,13 +297,21 @@
                 .then(data => {
                     const totalElement = document.querySelector('.total');
                     totalElement.innerText = data.total_volume;
-                    const msgElement = document.getElementById('lowFuelMsg');
+                    const warningMsg = document.getElementById('warningMsg');
+                    const lowFuelMsg = document.getElementById('lowFuelMsg');
+
+                    totalElement.classList.remove('total-normal', 'total-orange', 'total-red');
+                    warningMsg.style.display = 'none';
+                    lowFuelMsg.style.display = 'none';
+
                     if (data.total_volume <= LOW_FUEL_THRESHOLD) {
                         totalElement.classList.add('total-red');
-                        msgElement.style.display = 'block';
+                        lowFuelMsg.style.display = 'block';
+                    } else if (data.total_volume > LOW_FUEL_THRESHOLD && data.total_volume < WARNING_THRESHOLD) {
+                        totalElement.classList.add('total-orange');
+                        warningMsg.style.display = 'block';
                     } else {
-                        totalElement.classList.remove('total-red');
-                        msgElement.style.display = 'none';
+                        totalElement.classList.add('total-normal');
                     }
 
                     // Обновляем карточки уровнемеров
@@ -344,14 +365,25 @@
         document.addEventListener('DOMContentLoaded', function() {
             const totalElement = document.querySelector('.total');
             const currentTotal = parseFloat(totalElement.innerText);
-            const msgElement = document.getElementById('lowFuelMsg');
-            if (!isNaN(currentTotal) && currentTotal <= LOW_FUEL_THRESHOLD) {
-                totalElement.classList.add('total-red');
-                msgElement.style.display = 'block';
-            } else {
-                totalElement.classList.remove('total-red');
-                msgElement.style.display = 'none';
+            const warningMsg = document.getElementById('warningMsg');
+            const lowFuelMsg = document.getElementById('lowFuelMsg');
+
+            totalElement.classList.remove('total-normal', 'total-orange', 'total-red');
+            warningMsg.style.display = 'none';
+            lowFuelMsg.style.display = 'none';
+
+            if (!isNaN(currentTotal)) {
+                if (currentTotal <= LOW_FUEL_THRESHOLD) {
+                    totalElement.classList.add('total-red');
+                    lowFuelMsg.style.display = 'block';
+                } else if (currentTotal > LOW_FUEL_THRESHOLD && currentTotal < WARNING_THRESHOLD) {
+                    totalElement.classList.add('total-orange');
+                    warningMsg.style.display = 'block';
+                } else {
+                    totalElement.classList.add('total-normal');
+                }
             }
+
             updateKazsStatus();
         });
 

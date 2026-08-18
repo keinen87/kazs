@@ -344,6 +344,7 @@ def fillings_list(request):
         'search_query': search_query,
         'kazs_online': kazs_online,
         'low_fuel_threshold': settings.LOW_FUEL_THRESHOLD,
+        'warning_threshold': settings.WARNING_THRESHOLD,
     }
     return render(request, 'fillings_list.html', context)
 
