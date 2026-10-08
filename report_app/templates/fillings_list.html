@@ -161,7 +161,7 @@
     <div class="fuel-balance">
         <h3>Суммарный остаток топлива (л)</h3>
         <div class="total total-normal" id="totalVolume">{{ total_volume }}</div>
-        <div id="warningMsg" class="warning-msg" style="display: none;">Внимание! Через 1000 л. уровень топлива достигнет несливаемого остатка</div>
+        <div id="warningMsg" class="warning-msg" style="display: none;"></div>
         <div id="lowFuelMsg" class="low-fuel-msg" style="display: none;">уровень топлива достигает несливаемого остатка</div>
         <div class="meters-grid">
             {% for m in measurements %}
@@ -309,6 +309,8 @@
                         lowFuelMsg.style.display = 'block';
                     } else if (data.total_volume > LOW_FUEL_THRESHOLD && data.total_volume < WARNING_THRESHOLD) {
                         totalElement.classList.add('total-orange');
+                        const remaining = Math.round(data.total_volume - LOW_FUEL_THRESHOLD);
+                        warningMsg.textContent = `Внимание! Через ${remaining} л. уровень топлива достигнет несливаемого остатка`;
                         warningMsg.style.display = 'block';
                     } else {
                         totalElement.classList.add('total-normal');
@@ -378,6 +380,8 @@
                     lowFuelMsg.style.display = 'block';
                 } else if (currentTotal > LOW_FUEL_THRESHOLD && currentTotal < WARNING_THRESHOLD) {
                     totalElement.classList.add('total-orange');
+                    const remaining = Math.round(currentTotal - LOW_FUEL_THRESHOLD);
+                    warningMsg.textContent = `Внимание! Через ${remaining} л. уровень топлива достигнет несливаемого остатка`;
                     warningMsg.style.display = 'block';
                 } else {
                     totalElement.classList.add('total-normal');
