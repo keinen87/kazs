@@ -345,6 +345,7 @@ def fillings_list(request):
         'kazs_online': kazs_online,
         'low_fuel_threshold': settings.LOW_FUEL_THRESHOLD,
         'warning_threshold': settings.WARNING_THRESHOLD,
+        'fuel_threshold': settings.FUEL_THRESHOLD,
     }
     return render(request, 'fillings_list.html', context)
 
