@@ -181,7 +181,10 @@
 
 {% block content %}
     <div style="text-align: right; margin-bottom: 10px;">
-        <a href="{% url 'report_app:fuel_report' %}" style="color: #007bff; text-decoration: none;">
+        <a
+            href="{% url 'report_app:fuel_report' %}"
+            style="color: #007bff; text-decoration: none;"
+        >
             📊 Отчёт КАЗС и Fort Monitor
         </a>
     </div>
@@ -195,12 +198,12 @@
 
         <div id="warningMsg" class="warning-msg" style="display: none;"></div>
 
-        <!-- Сообщение для LOW_FUEL_THRESHOLD -->
+        <!-- Сообщение при достижении LOW_FUEL_THRESHOLD -->
         <div id="lowFuelMsg" class="low-fuel-msg" style="display: none;">
             уровень топлива достигает несливаемого остатка
         </div>
 
-        <!-- Сообщение для FUEL_THRESHOLD -->
+        <!-- Сообщение при достижении FUEL_THRESHOLD -->
         <div id="fuelImpossibleMsg" class="low-fuel-msg" style="display: none;">
             Заправка невозможна!
         </div>
@@ -250,7 +253,9 @@
     <div class="search-row">
         <div class="kazs-status">
             <span class="status-light status-green" id="kazsLight"></span>
-            <span class="status-text" id="kazsText">КАЗС включена</span>
+            <span class="status-text" id="kazsText">
+                КАЗС включена
+            </span>
         </div>
 
         <div class="search-form">
@@ -380,17 +385,25 @@
     </div>
 
     <script>
-        // Пороги передаются из Django-контекста
+        // Пороги из контекста Django
         const FUEL_THRESHOLD = {{ fuel_threshold }};
         const LOW_FUEL_THRESHOLD = {{ low_fuel_threshold }};
         const WARNING_THRESHOLD = {{ warning_threshold }};
 
 
         function updateFuelMessages(totalVolume) {
-            const totalElement = document.getElementById('totalVolume');
-            const warningMsg = document.getElementById('warningMsg');
-            const lowFuelMsg = document.getElementById('lowFuelMsg');
-            const fuelImpossibleMsg = document.getElementById('fuelImpossibleMsg');
+            const totalElement =
+                document.getElementById('totalVolume');
+
+            const warningMsg =
+                document.getElementById('warningMsg');
+
+            const lowFuelMsg =
+                document.getElementById('lowFuelMsg');
+
+            const fuelImpossibleMsg =
+                document.getElementById('fuelImpossibleMsg');
+
 
             totalElement.classList.remove(
                 'total-normal',
@@ -402,13 +415,20 @@
             lowFuelMsg.style.display = 'none';
             fuelImpossibleMsg.style.display = 'none';
 
+
             /*
              * Приоритет условий:
              *
-             * 1. FUEL_THRESHOLD — заправка невозможна.
-             * 2. LOW_FUEL_THRESHOLD — достигнут несливаемый остаток.
-             * 3. WARNING_THRESHOLD — предупреждение о приближении
-             *    к несливаемому остатку.
+             * 1. Остаток <= FUEL_THRESHOLD:
+             *    заправка невозможна.
+             *
+             * 2. Остаток больше FUEL_THRESHOLD,
+             *    но меньше либо равен LOW_FUEL_THRESHOLD:
+             *    достигнут несливаемый остаток.
+             *
+             * 3. Остаток больше LOW_FUEL_THRESHOLD,
+             *    но меньше WARNING_THRESHOLD:
+             *    выводится предупреждение.
              */
             if (totalVolume <= FUEL_THRESHOLD) {
                 totalElement.classList.add('total-red');
@@ -421,8 +441,17 @@
             } else if (totalVolume < WARNING_THRESHOLD) {
                 totalElement.classList.add('total-orange');
 
+                /*
+                 * Расчёт выполняется от FUEL_THRESHOLD,
+                 * а не от LOW_FUEL_THRESHOLD.
+                 *
+                 * Например:
+                 * текущий остаток = 5000 л
+                 * FUEL_THRESHOLD = 4000 л
+                 * remaining = 1000 л
+                 */
                 const remaining = Math.round(
-                    totalVolume - LOW_FUEL_THRESHOLD
+                    totalVolume - FUEL_THRESHOLD
                 );
 
                 warningMsg.textContent =
@@ -446,20 +475,24 @@
                     return response.json();
                 })
                 .then(data => {
-                    const totalElement = document.getElementById('totalVolume');
+                    const totalElement =
+                        document.getElementById('totalVolume');
 
                     totalElement.innerText = data.total_volume;
 
                     updateFuelMessages(data.total_volume);
 
-                    // Обновляем карточки уровнемеров
-                    const metersGrid = document.querySelector('.meters-grid');
+
+                    // Обновление карточек уровнемеров
+                    const metersGrid =
+                        document.querySelector('.meters-grid');
 
                     if (metersGrid) {
                         metersGrid.innerHTML = '';
 
                         data.measurements.forEach(m => {
-                            const card = document.createElement('div');
+                            const card =
+                                document.createElement('div');
 
                             card.className = 'meter-card';
 
@@ -469,15 +502,27 @@
                                 </div>
 
                                 <div class="meter-litres">
-                                    ${m.liters !== null ? m.liters + ' л' : '— л'}
+                                    ${
+                                        m.liters !== null
+                                            ? m.liters + ' л'
+                                            : '— л'
+                                    }
                                 </div>
 
                                 <div class="meter-level">
-                                    ${m.level_cm !== null ? m.level_cm.toFixed(1) + ' см' : '—'}
+                                    ${
+                                        m.level_cm !== null
+                                            ? m.level_cm.toFixed(1) + ' см'
+                                            : '—'
+                                    }
                                 </div>
 
                                 <div class="meter-mass">
-                                    ${m.mass_kg !== null ? m.mass_kg + ' кг' : '—'}
+                                    ${
+                                        m.mass_kg !== null
+                                            ? m.mass_kg + ' кг'
+                                            : '—'
+                                    }
                                 </div>
                             `;
 
@@ -505,15 +550,25 @@
                     return response.json();
                 })
                 .then(data => {
-                    const light = document.getElementById('kazsLight');
-                    const text = document.getElementById('kazsText');
+                    const light =
+                        document.getElementById('kazsLight');
+
+                    const text =
+                        document.getElementById('kazsText');
+
 
                     if (data.online) {
-                        light.className = 'status-light status-green';
-                        text.textContent = 'КАЗС включена';
+                        light.className =
+                            'status-light status-green';
+
+                        text.textContent =
+                            'КАЗС включена';
                     } else {
-                        light.className = 'status-light status-red';
-                        text.textContent = 'КАЗС выключена';
+                        light.className =
+                            'status-light status-red';
+
+                        text.textContent =
+                            'КАЗС выключена';
                     }
                 })
                 .catch(error => {
@@ -522,19 +577,30 @@
                         error
                     );
 
-                    const light = document.getElementById('kazsLight');
-                    const text = document.getElementById('kazsText');
+                    const light =
+                        document.getElementById('kazsLight');
 
-                    light.className = 'status-light status-red';
-                    text.textContent = 'Статус КАЗС неизвестен';
+                    const text =
+                        document.getElementById('kazsText');
+
+
+                    light.className =
+                        'status-light status-red';
+
+                    text.textContent =
+                        'Статус КАЗС неизвестен';
                 });
         }
 
 
         // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
-            const totalElement = document.getElementById('totalVolume');
-            const currentTotal = parseFloat(totalElement.innerText);
+            const totalElement =
+                document.getElementById('totalVolume');
+
+            const currentTotal =
+                parseFloat(totalElement.innerText);
+
 
             if (!isNaN(currentTotal)) {
                 updateFuelMessages(currentTotal);
