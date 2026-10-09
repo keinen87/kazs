@@ -61,7 +61,7 @@ def datetime_to_ticks(dt):
 
 
 def check_kazs_online():
-    """Проверяет доступность КАЗС по IP из настроек с кэшированием в memcached (30 секунд)"""
+    """Проверяет доступность КАЗС по IP с кэшированием в memcached (30 секунд)"""
     mc = memcache.Client([FM_MC_SERVER], debug=0)
     cache_key = "kazs_status"
     cached = mc.get(cache_key)
@@ -70,9 +70,15 @@ def check_kazs_online():
 
     ip = settings.KAZS_IP
     param = "-n" if platform.system().lower() == "windows" else "-c"
-    command = ["ping", param, "1", ip]
+    # 3 пакета, таймаут ожидания 5 секунд
+    command = ["ping", param, "3", ip]
     try:
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5
+        )
         online = result.returncode == 0
     except (subprocess.TimeoutExpired, Exception):
         online = False
