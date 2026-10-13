@@ -1,15 +1,18 @@
-from django.shortcuts import render
-from django.core.paginator import Paginator
-from django.db.models import Sum
-from django.http import JsonResponse
-from django.conf import settings
-from .models import LevelMetersData, Fillings, Users
-from datetime import datetime, timedelta
-from calendar import monthrange
+import json
 import requests
 import memcache
 import subprocess
 import platform
+from django.shortcuts import render
+from django.core.paginator import Paginator
+from django.db.models import Sum
+from django.http import JsonResponse, HttpResponse
+from django.conf import settings
+from .models import LevelMetersData, Fillings, Users
+from datetime import datetime, timedelta
+from calendar import monthrange
+from collections import defaultdict
+
 
 # ---------------------- Константы FortMonitor ----------------------
 FM_REPORT_URL = "http://31.173.168.107:8080/"
@@ -18,6 +21,12 @@ FM_LOGIN = "bassol_api"
 FM_PASSWORD = "Bassl22052026"
 FM_MC_SERVER = '127.0.0.1:11211'
 FM_CACHE_TIMEOUT = 300   # 5 минут для кэширования данных заправок и остатков
+
+MONTH_NAMES_RU = {
+    1: 'Январь', 2: 'Февраль', 3: 'Март', 4: 'Апрель',
+    5: 'Май', 6: 'Июнь', 7: 'Июль', 8: 'Август',
+    9: 'Сентябрь', 10: 'Октябрь', 11: 'Ноябрь', 12: 'Декабрь'
+}
 
 VEHICLE_MAP = {
     '8': 'Hino',
@@ -462,3 +471,224 @@ def kazs_status_api(request):
     """Возвращает JSON с состоянием КАЗС для AJAX-обновления"""
     online = check_kazs_online()
     return JsonResponse({'online': online})
+
+# ---------------------- Статистика по КАЗС ----------------------
+def _collect_kazs_statistics(date_from, date_to):
+    """Собирает все данные для страницы статистики по КАЗС."""
+    ticks_from = datetime_to_ticks(date_from)
+    ticks_to = datetime_to_ticks(date_to)
+
+    fillings = Fillings.objects.filter(
+        litre__gt=0,
+        date_time__gte=ticks_from,
+        date_time__lte=ticks_to,
+        date_time__isnull=False,
+        date_time__gt=0
+    ).select_related('id_user').order_by('date_time')
+
+    monthly = defaultdict(lambda: {'liters': 0.0, 'count': 0})
+    weekday = defaultdict(float)
+    hour = defaultdict(float)
+    total_by_user = {}
+
+    for f in fillings:
+        dt = ticks_to_datetime(f.date_time)
+        if not dt:
+            continue
+        key = dt.strftime('%Y-%m')
+        liters = float(f.litre)
+        monthly[key]['liters'] += liters
+        monthly[key]['count'] += 1
+        weekday[dt.weekday()] += liters
+        hour[dt.hour] += liters
+        if f.id_user:
+            name = f.id_user.full_name
+            total_by_user[name] = total_by_user.get(name, 0) + liters
+
+    # Список месяцев выбранного периода
+    chart_labels, chart_data, table_data = [], [], []
+    cursor = datetime(date_from.year, date_from.month, 1)
+    end_cursor = datetime(date_to.year, date_to.month, 1)
+    while cursor <= end_cursor:
+        key = cursor.strftime('%Y-%m')
+        label = f"{MONTH_NAMES_RU[cursor.month]} {cursor.year}"
+        liters = monthly[key]['liters']
+        count = monthly[key]['count']
+        chart_labels.append(label)
+        chart_data.append(round(liters, 2))
+        table_data.append({
+            'month': label,
+            'liters': round(liters, 2),
+            'count': count,
+        })
+        if cursor.month == 12:
+            cursor = datetime(cursor.year + 1, 1, 1)
+        else:
+            cursor = datetime(cursor.year, cursor.month + 1, 1)
+
+    # Топ-15 техники
+    top_users = sorted(total_by_user.items(), key=lambda x: -x[1])[:15]
+
+    # Дни недели и часы
+    weekday_labels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+    weekday_data = [round(weekday[i], 2) for i in range(7)]
+    hour_labels = [f"{i:02d}" for i in range(24)]
+    hour_data = [round(hour[i], 2) for i in range(24)]
+
+    # Сравнение год к году
+    current_year = date_to.year
+    prev_year = current_year - 1
+    year_agg = defaultdict(float)
+    start_compare = datetime(prev_year, 1, 1)
+    end_compare = datetime(current_year, 12, 31, 23, 59, 59)
+    compare_fillings = Fillings.objects.filter(
+        litre__gt=0,
+        date_time__gte=datetime_to_ticks(start_compare),
+        date_time__lte=datetime_to_ticks(end_compare),
+        date_time__isnull=False,
+        date_time__gt=0
+    )
+    for f in compare_fillings:
+        dt = ticks_to_datetime(f.date_time)
+        if not dt:
+            continue
+        year_agg[dt.strftime('%Y-%m')] += float(f.litre)
+
+    compare_labels = [MONTH_NAMES_RU[m] for m in range(1, 13)]
+    current_year_data = [round(year_agg.get(f"{current_year}-{m:02d}", 0), 2) for m in range(1, 13)]
+    prev_year_data = [round(year_agg.get(f"{prev_year}-{m:02d}", 0), 2) for m in range(1, 13)]
+
+    return {
+        'chart_labels': chart_labels,
+        'chart_data': chart_data,
+        'table_data': table_data,
+        'top_users': top_users,
+        'total_period': round(sum(chart_data), 2),
+        'total_fillings': sum(r['count'] for r in table_data),
+        'weekday_labels': weekday_labels,
+        'weekday_data': weekday_data,
+        'hour_labels': hour_labels,
+        'hour_data': hour_data,
+        'compare_labels': compare_labels,
+        'current_year': current_year,
+        'prev_year': prev_year,
+        'current_year_data': current_year_data,
+        'prev_year_data': prev_year_data,
+    }
+
+
+def kazs_statistics(request):
+    """Страница статистики по КАЗС с выбором периода."""
+    today = datetime.now().date()
+    date_from_str = request.GET.get('date_from')
+    date_to_str = request.GET.get('date_to')
+
+    if date_from_str:
+        try:
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d')
+        except ValueError:
+            date_from = datetime(today.year, 1, 1)
+    else:
+        date_from = datetime(today.year, 1, 1)
+
+    if date_to_str:
+        try:
+            date_to_dt = datetime.strptime(date_to_str, '%Y-%m-%d')
+            date_to = datetime(date_to_dt.year, date_to_dt.month, date_to_dt.day, 23, 59, 59)
+        except ValueError:
+            date_to = datetime(today.year, today.month, today.day, 23, 59, 59)
+    else:
+        date_to = datetime(today.year, today.month, today.day, 23, 59, 59)
+
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    stats = _collect_kazs_statistics(date_from, date_to)
+    stats['date_from'] = date_from.strftime('%Y-%m-%d')
+    stats['date_to'] = date_to.strftime('%Y-%m-%d')
+    stats['period_start'] = date_from.strftime('%d.%m.%Y')
+    stats['period_end'] = date_to.strftime('%d.%m.%Y')
+
+    return render(request, 'kazs_statistics.html', stats)
+
+
+def kazs_statistics_export(request):
+    """Экспорт статистики в Excel."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except ImportError:
+        return HttpResponse(
+            "Библиотека openpyxl не установлена. Выполните: pip install openpyxl",
+            status=500
+        )
+
+    today = datetime.now().date()
+    date_from_str = request.GET.get('date_from')
+    date_to_str = request.GET.get('date_to')
+
+    if date_from_str:
+        try:
+            date_from = datetime.strptime(date_from_str, '%Y-%m-%d')
+        except ValueError:
+            date_from = datetime(today.year, 1, 1)
+    else:
+        date_from = datetime(today.year, 1, 1)
+
+    if date_to_str:
+        try:
+            date_to_dt = datetime.strptime(date_to_str, '%Y-%m-%d')
+            date_to = datetime(date_to_dt.year, date_to_dt.month, date_to_dt.day, 23, 59, 59)
+        except ValueError:
+            date_to = datetime(today.year, today.month, today.day, 23, 59, 59)
+    else:
+        date_to = datetime(today.year, today.month, today.day, 23, 59, 59)
+
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    stats = _collect_kazs_statistics(date_from, date_to)
+
+    wb = Workbook()
+
+    # Лист "Помесячно"
+    ws1 = wb.active
+    ws1.title = "Помесячно"
+    ws1.append(['Месяц', 'Литров', 'Заправок'])
+    for row in stats['table_data']:
+        ws1.append([row['month'], row['liters'], row['count']])
+
+    # Лист "Топ техники"
+    ws2 = wb.create_sheet("Топ техники")
+    ws2.append(['№', 'Техника', 'Литров'])
+    for i, (name, liters) in enumerate(stats['top_users'], start=1):
+        ws2.append([i, name, round(liters, 2)])
+
+    # Лист "Сводка"
+    ws3 = wb.create_sheet("Сводка")
+    ws3.append(['Период', f"{stats['period_start'] if 'period_start' in stats else date_from.strftime('%d.%m.%Y')} – {date_to.strftime('%d.%m.%Y')}"])
+    ws3.append(['Всего литров', stats['total_period']])
+    ws3.append(['Всего заправок', stats['total_fillings']])
+
+    # Стили
+    for ws in [ws1, ws2, ws3]:
+        if ws.max_row >= 1:
+            for cell in ws[1]:
+                if cell.value:
+                    cell.font = Font(bold=True)
+                    cell.fill = PatternFill(start_color='DDDDDD', end_color='DDDDDD', fill_type='solid')
+        for column in ws.columns:
+            letter = column[0].column_letter
+            max_length = max(
+                (len(str(c.value)) for c in column if c.value is not None),
+                default=10
+            )
+            ws.column_dimensions[letter].width = min(max_length + 4, 50)
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    filename = f"kazs_statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response

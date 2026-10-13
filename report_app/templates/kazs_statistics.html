@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Статистика по КАЗС{% endblock %}
+
+{% block extra_styles %}
+    <style>
+        .stats-container {
+            max-width: 1300px;
+            margin: 0 auto;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+        .filter-form {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #dee2e6;
+        }
+        .filter-form label {
+            font-weight: bold;
+        }
+        .filter-form input[type="date"] {
+            padding: 6px 10px;
+            font-size: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .filter-form button {
+            padding: 6px 15px;
+            font-size: 1rem;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .filter-form button:hover {
+            background-color: #0056b3;
+        }
+        .btn-export {
+            background-color: #28a745 !important;
+        }
+        .btn-export:hover {
+            background-color: #218838 !important;
+        }
+        .summary {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .summary-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px 25px;
+            border: 1px solid #dee2e6;
+            text-align: center;
+            min-width: 180px;
+            flex: 1;
+        }
+        .summary-card .value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .summary-card .label {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 5px;
+            text-transform: uppercase;
+        }
+        .chart-wrapper {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 1px solid #dee2e6;
+        }
+        .chart-wrapper h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.1rem;
+        }
+        .charts-2col {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .charts-2col > .chart-wrapper {
+            flex: 1;
+            min-width: 350px;
+        }
+        .row-2col {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        .col-table, .col-top {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            min-width: 300px;
+        }
+        .col-table h3, .col-top h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 1.1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-size: 0.9rem;
+        }
+        td {
+            font-size: 0.9rem;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .table-scroll {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #007bff;
+            text-decoration: none;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+    <div class="stats-container">
+        <h1>Статистика по КАЗС</h1>
+        <div class="subtitle">Период: {{ period_start }} – {{ period_end }}</div>
+
+        <form class="filter-form" method="get" action="">
+            <label for="date_from">С:</label>
+            <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
+            <label for="date_to">По:</label>
+            <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
+            <button type="submit">Показать</button>
+            <button type="button" class="btn-export" onclick="exportExcel()">Экспорт в Excel</button>
+        </form>
+
+        <div class="summary">
+            <div class="summary-card">
+                <div class="value">{{ total_period }}</div>
+                <div class="label">Всего литров за период</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{{ total_fillings }}</div>
+                <div class="label">Всего заправок</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{{ table_data|length }}</div>
+                <div class="label">Месяцев в отчёте</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{{ top_users|length }}</div>
+                <div class="label">Единиц техники</div>
+            </div>
+        </div>
+
+        <div class="chart-wrapper">
+            <h3>Потребление топлива по месяцам (л)</h3>
+            <canvas id="monthlyChart" height="90"></canvas>
+        </div>
+
+        <div class="charts-2col">
+            <div class="chart-wrapper">
+                <h3>Распределение по дням недели (л)</h3>
+                <canvas id="weekdayChart" height="140"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <h3>Распределение по часам суток (л)</h3>
+                <canvas id="hourChart" height="140"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-wrapper">
+            <h3>Сравнение год к году ({{ prev_year }} vs {{ current_year }}, л)</h3>
+            <canvas id="yearCompareChart" height="100"></canvas>
+        </div>
+
+        <div class="row-2col">
+            <div class="col-table">
+                <h3>Помесячная разбивка</h3>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Месяц</th>
+                                <th>Литров</th>
+                                <th>Заправок</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in table_data %}
+                            <tr>
+                                <td>{{ row.month }}</td>
+                                <td>{{ row.liters }}</td>
+                                <td>{{ row.count }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="col-top">
+                <h3>Топ-15 техники по расходу (л)</h3>
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>№</th>
+                                <th>Техника</th>
+                                <th>Литров</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for name, liters in top_users %}
+                            <tr>
+                                <td>{{ forloop.counter }}</td>
+                                <td>{{ name }}</td>
+                                <td>{{ liters|floatformat:2 }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="3">Нет данных.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <a href="{% url 'report_app:fillings_list' %}" class="back-link">← Назад к списку заправок</a>
+    </div>
+
+    <script>
+        const chartLabels = {{ chart_labels|safe }};
+        const chartData = {{ chart_data|safe }};
+        const weekdayLabels = {{ weekday_labels|safe }};
+        const weekdayData = {{ weekday_data|safe }};
+        const hourLabels = {{ hour_labels|safe }};
+        const hourData = {{ hour_data|safe }};
+        const compareLabels = {{ compare_labels|safe }};
+        const prevYearData = {{ prev_year_data|safe }};
+        const currentYearData = {{ current_year_data|safe }};
+        const prevYear = {{ prev_year }};
+        const currentYear = {{ current_year }};
+
+        // 1. График по месяцам
+        new Chart(document.getElementById('monthlyChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    label: 'Литров за месяц',
+                    data: chartData,
+                    backgroundColor: 'rgba(0, 123, 255, 0.6)',
+                    borderColor: 'rgba(0, 123, 255, 1)',
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.parsed.y.toFixed(2) + ' л'
+                        }
+                    }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Литры' } }
+                }
+            }
+        });
+
+        // 2. График по дням недели
+        new Chart(document.getElementById('weekdayChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: weekdayLabels,
+                datasets: [{
+                    label: 'Литров',
+                    data: weekdayData,
+                    backgroundColor: 'rgba(40, 167, 69, 0.6)',
+                    borderColor: 'rgba(40, 167, 69, 1)',
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        // 3. График по часам
+        new Chart(document.getElementById('hourChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: hourLabels,
+                datasets: [{
+                    label: 'Литров',
+                    data: hourData,
+                    backgroundColor: 'rgba(255, 193, 7, 0.3)',
+                    borderColor: 'rgba(255, 152, 0, 1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true },
+                    x: { title: { display: true, text: 'Час суток' } }
+                }
+            }
+        });
+
+        // 4. Сравнение год к году
+        new Chart(document.getElementById('yearCompareChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: compareLabels,
+                datasets: [
+                    {
+                        label: prevYear.toString(),
+                        data: prevYearData,
+                        backgroundColor: 'rgba(108, 117, 125, 0.2)',
+                        borderColor: 'rgba(108, 117, 125, 1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                    },
+                    {
+                        label: currentYear.toString(),
+                        data: currentYearData,
+                        backgroundColor: 'rgba(0, 123, 255, 0.2)',
+                        borderColor: 'rgba(0, 123, 255, 1)',
+                        borderWidth: 2,
+                        fill: false,
+                        tension: 0.3,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + ' л'
+                        }
+                    }
+                },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        function exportExcel() {
+            const dateFrom = document.getElementById('date_from').value;
+            const dateTo = document.getElementById('date_to').value;
+            window.location.href = '{% url "report_app:kazs_statistics_export" %}?date_from=' + dateFrom + '&date_to=' + dateTo;
+        }
+    </script>
+{% endblock %}
